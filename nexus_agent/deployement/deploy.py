@@ -209,6 +209,10 @@ def _run_deploy() -> None:
                 "GOOGLE_WORKSPACE_PROJECT_ID": os.getenv(
                     "GOOGLE_WORKSPACE_PROJECT_ID", os.getenv("PROJECT_ID")
                 ),
+                # 工具硬确认开关（GE 确认事件流验证未过时置 0 回退，见验证清单 F5）
+                "AGENT_ENABLE_TOOL_CONFIRMATION": os.getenv(
+                    "AGENT_ENABLE_TOOL_CONFIRMATION", "1"
+                ),
             },
         )
     except FuturesTimeoutError:

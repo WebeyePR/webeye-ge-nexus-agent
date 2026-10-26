@@ -12,7 +12,7 @@ import os
 
 
 from google.adk.sessions import InMemorySessionService
-from google.adk.tools import LongRunningFunctionTool, ToolContext
+from google.adk.tools import FunctionTool, LongRunningFunctionTool, ToolContext
 
 
 class TestLongRunningTaskTools:
@@ -36,10 +36,35 @@ class TestLongRunningTaskTools:
         tool_objects = root_agent.tools
         lrfts = [t for t in tool_objects if isinstance(t, LongRunningFunctionTool)]
         assert len(lrfts) == 2, f"agent 应挂载 2 个长任务工具，实际 {len(lrfts)}"
-        # 36 个挂载项 = 34 个普通函数（由 ADK 运行时自动包装为 FunctionTool）+ 2 个长任务
+        # 36 个挂载项 = 29 个普通函数（ADK 运行时自动包装）+ 5 个显式
+        # FunctionTool 硬确认包装（delete 恒确认 + 4 个 CLI 总线动态确认）+ 2 个长任务
         others = [t for t in tool_objects if not isinstance(t, LongRunningFunctionTool)]
         assert len(others) == 34
-        assert all(callable(t) for t in others)
+        assert all(
+            callable(t) or (isinstance(t, FunctionTool) and callable(t.func))
+            for t in others
+        ), "每个挂载项必须是可调用函数或含 func 的 FunctionTool"
+
+    def test_tool_confirmation_wrapping(self):
+        """ADK 2.13 原生硬确认：delete 恒确认，CLI 总线动态确认（干跑放行）。"""
+
+        from google.adk.tools import FunctionTool
+
+        from nexus_agent.agent import root_agent
+
+        by_name = {t.name: t for t in root_agent.tools if isinstance(t, FunctionTool)}
+        assert by_name["delete_lark_document"]._require_confirmation is True
+        for bus in (
+            "execute_lark_cli",
+            "execute_lark_cli_flat",
+            "execute_google_workspace_cli",
+            "execute_google_workspace_cli_flat",
+        ):
+            pred = by_name[bus]._require_confirmation
+            assert callable(pred), f"{bus} 应挂动态确认判定"
+            assert pred(allow_mutating=True, dry_run=False) is True
+            assert pred(allow_mutating=True, dry_run=True) is False
+            assert pred(allow_mutating=False) is False
 
     def test_long_running_declaration_note(self):
         """框架自动在声明中追加长任务说明（避免模型重复轮询调用）。"""

@@ -173,6 +173,24 @@ You possess advanced image processing logic. Execute this strict, dual-decision 
 
 NOTICE: **ALL RESPONSES RETURNED TO THE USER MUST BE FORMATTED IN BEAUTIFUL, HIGHEST-QUALITY MARKDOWN.**"""
 
+from google.adk.tools import FunctionTool
+
+
+def _confirm_real_mutation(**kwargs) -> bool:
+    """ADK 2.13 原生动态硬确认判定（CLI 总线专用）：
+    仅当真实执行突变操作（allow_mutating=True 且 dry_run=False）时要求用户
+    框架级确认；干跑/只读放行。与指令层两阶段审计形成双保险。"""
+    return bool(kwargs.get("allow_mutating")) and not kwargs.get("dry_run", True)
+
+
+# ADK 2.13 原生 require_confirmation 硬确认（开发期采纳，长期架构）：
+# - delete_lark_document：不可逆删除，恒要求框架级确认
+# - 4 个 CLI 总线工具：动态确认（干跑放行、真执行拦截）
+# - execute_lark_api 无干跑参数，突变判别不可靠，仍走指令层审计 + ToolAuditPlugin
+# 回退开关：AGENT_ENABLE_TOOL_CONFIRMATION=0（GE 界面确认事件流验证未过时使用，
+# 见 docs/升级后全量功能验证清单.md F5）
+_ENABLE_TOOL_CONFIRMATION = os.getenv("AGENT_ENABLE_TOOL_CONFIRMATION", "1") == "1"
+
 root_agent = Agent(
     model=os.getenv("MODEL_NAME", "gemini-3-flash-preview"),
     name="webeye_nexus_agent",
@@ -191,7 +209,9 @@ root_agent = Agent(
         get_access_token,
         create_lark_document,
         update_lark_document,
-        delete_lark_document,
+        FunctionTool(delete_lark_document, require_confirmation=True)
+        if _ENABLE_TOOL_CONFIRMATION
+        else delete_lark_document,
         execute_lark_api,
         feishu_mcp_create_doc,
         feishu_mcp_update_doc,
@@ -211,13 +231,21 @@ root_agent = Agent(
         discover_google_workspace_operations,
         get_google_workspace_command_spec,
         get_google_workspace_operation_schema,
-        execute_google_workspace_cli,
-        execute_google_workspace_cli_flat,
+        FunctionTool(execute_google_workspace_cli, require_confirmation=_confirm_real_mutation)
+        if _ENABLE_TOOL_CONFIRMATION
+        else execute_google_workspace_cli,
+        FunctionTool(execute_google_workspace_cli_flat, require_confirmation=_confirm_real_mutation)
+        if _ENABLE_TOOL_CONFIRMATION
+        else execute_google_workspace_cli_flat,
         discover_lark_operations,
         get_lark_command_spec,
         get_lark_operation_schema,
-        execute_lark_cli,
-        execute_lark_cli_flat,
+        FunctionTool(execute_lark_cli, require_confirmation=_confirm_real_mutation)
+        if _ENABLE_TOOL_CONFIRMATION
+        else execute_lark_cli,
+        FunctionTool(execute_lark_cli_flat, require_confirmation=_confirm_real_mutation)
+        if _ENABLE_TOOL_CONFIRMATION
+        else execute_lark_cli_flat,
         render_image_as_artifact,
     ],
 )

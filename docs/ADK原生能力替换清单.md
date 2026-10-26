@@ -241,3 +241,21 @@
 | 2.11.0 | ToolCallIntegrityPlugin、ModelConsultTool、SQLite memory | 已在第三/七遍有据不采 |
 
 **结论**：2.11–2.13 三版的性能红利（8 倍回合提速、40% 首请求、断连自取消）因锁定最新版**全部自动享受**；无新增可采纳项；breaking change 已隔离。联网+源码核对闭环。
+
+## 十四、第十二遍审计（2026-10-27 00:27 补充）——开发期长远利益重裁决：硬确认机制接入
+
+用户新注："在开发中，长远利益优先，可全面推翻重构"。据此重审此前因生产风险搁置的项：
+
+**✅ 采纳接入：ADK 2.13 原生 `require_confirmation` 硬确认（F5 候选转正）**
+- 源码确认 `FunctionTool(func, require_confirmation=bool | Callable[[args], bool])` 支持动态判定（predicate 收到完整调用 kwargs）
+- 实施范围：`delete_lark_document` 恒确认（不可逆删除）+ `execute_lark_cli(_flat)` / `execute_google_workspace_cli(_flat)` 4 个总线工具动态确认——干跑/只读放行，仅 `allow_mutating=True 且 dry_run=False` 真执行时拦截，与指令层两阶段审计形成双保险
+- `execute_lark_api` 无干跑参数、突变判别不可靠，维持指令层审计 + ToolAuditPlugin（已知边界，记录在案）
+- 回退开关 `AGENT_ENABLE_TOOL_CONFIRMATION=0`（agent.py 构建期 + deploy.py env_vars 双层可控）
+- 实测：5 工具包装正确、判定逻辑三态验证（真执行 True/干跑 False/只读 False）、96 测试全绿（新增 test_tool_confirmation_wrapping）、端到端冒烟全过（只读调用不受拦截）
+
+**重审维持不采（长远视角下仍无净收益）**：
+- EventsCompactionConfig：额外 LLM 成本 + GE 事件渲染兼容风险，待线上会话数据再议
+- BaseToolset 分组重构 36 工具：纯组织性收益、零功能增益、36 个声明回归风险大——声明式平铺即 ADK 推荐形态
+- Workflow/sub_agents/工具集类：项目形态不变，维持原判
+
+**验证**：96 测试全绿、冒烟 30 partial + 24 工具调用全过。
