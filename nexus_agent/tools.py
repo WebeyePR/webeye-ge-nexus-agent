@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -514,7 +515,7 @@ def get_google_workspace_command_spec(command_id: str) -> dict:
     }
 
 
-def get_google_workspace_operation_schema(method_path: str, tool_context: ToolContext) -> dict:
+async def get_google_workspace_operation_schema(method_path: str, tool_context: ToolContext) -> dict:
     """
     Fetch a gws operation schema, e.g. drive.files.list or sheets.spreadsheets.create.
     """
@@ -526,7 +527,10 @@ def get_google_workspace_operation_schema(method_path: str, tool_context: ToolCo
     service = safe_method.split(".", 1)[0]
     if service not in GWS_ALLOWED_SERVICES:
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: f"Unsupported gws service: {service}"}
-    result = _run_google_workspace_cli(["schema", safe_method], tool_context, timeout_seconds=60)
+    # to_thread：schema 经 CLI 子进程拉取，期间释放事件循环
+    result = await asyncio.to_thread(
+        _run_google_workspace_cli, ["schema", safe_method], tool_context, timeout_seconds=60
+    )
     if result.get(STATUS_KEY) != STATUS_SUCCESS:
         return result
 
@@ -545,7 +549,7 @@ def get_google_workspace_operation_schema(method_path: str, tool_context: ToolCo
     }
 
 
-def execute_google_workspace_cli(
+async def execute_google_workspace_cli(
     args_json: str,
     tool_context: ToolContext,
     dry_run: bool = True,
@@ -574,7 +578,8 @@ def execute_google_workspace_cli(
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: str(e)}
 
     timeout_seconds = _safe_limit(timeout_seconds, default=120, minimum=10, maximum=300)
-    result = _run_google_workspace_cli(args, tool_context, timeout_seconds=timeout_seconds)
+    # to_thread：CLI 子进程秒级 IO，期间释放事件循环（ADK 同步调用不自动线程化）
+    result = await asyncio.to_thread(_run_google_workspace_cli, args, tool_context, timeout_seconds=timeout_seconds)
     if command_spec:
         result = dict(result)
         result["command_id"] = command_spec["command_id"]
@@ -583,7 +588,7 @@ def execute_google_workspace_cli(
     return result
 
 
-def execute_google_workspace_cli_flat(
+async def execute_google_workspace_cli_flat(
     service: str,
     resource: str,
     method: str,
@@ -666,8 +671,9 @@ def execute_google_workspace_cli_flat(
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: str(e)}
 
     timeout_seconds = _safe_limit(timeout_seconds, default=120, minimum=10, maximum=300)
-    result = _run_google_workspace_cli(args, tool_context, timeout_seconds=timeout_seconds)
-    
+    # to_thread：CLI 子进程秒级 IO，期间释放事件循环
+    result = await asyncio.to_thread(_run_google_workspace_cli, args, tool_context, timeout_seconds=timeout_seconds)
+
     if command_spec:
         result = dict(result)
         result["command_id"] = command_spec["command_id"]
@@ -676,7 +682,7 @@ def execute_google_workspace_cli_flat(
     return result
 
 
-def search_google_drive_files(query: str, tool_context: ToolContext, page_size: int = 10) -> dict:
+async def search_google_drive_files(query: str, tool_context: ToolContext, page_size: int = 10) -> dict:
     """
     Search Google Drive files for the authenticated Google Workspace user.
 
@@ -695,7 +701,8 @@ def search_google_drive_files(query: str, tool_context: ToolContext, page_size: 
 
     fields = "files(id,name,mimeType,webViewLink,modifiedTime),nextPageToken"
     params = {"q": drive_query, "pageSize": page_size}
-    return _run_google_workspace_cli(
+    return await asyncio.to_thread(
+        _run_google_workspace_cli,
         [
             "drive",
             "files",
@@ -709,7 +716,7 @@ def search_google_drive_files(query: str, tool_context: ToolContext, page_size: 
     )
 
 
-def append_google_doc_text(document_id: str, text: str, tool_context: ToolContext) -> dict:
+async def append_google_doc_text(document_id: str, text: str, tool_context: ToolContext) -> dict:
     """
     Append plain text to a Google Docs document using gws docs +write.
 
@@ -721,13 +728,14 @@ def append_google_doc_text(document_id: str, text: str, tool_context: ToolContex
     if not text:
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "text is required."}
 
-    return _run_google_workspace_cli(
+    return await asyncio.to_thread(
+        _run_google_workspace_cli,
         ["docs", "+write", "--document", document_id.strip(), "--text", text],
         tool_context,
     )
 
 
-def create_google_doc_with_text(title: str, text: str, tool_context: ToolContext) -> dict:
+async def create_google_doc_with_text(title: str, text: str, tool_context: ToolContext) -> dict:
     """
     Create a Google Docs document with high-fidelity formatting.
     This converts input Markdown text into standard HTML, uploads it to Google Drive
@@ -1000,7 +1008,8 @@ def create_google_doc_with_text(title: str, text: str, tool_context: ToolContext
             "mimeType": "application/vnd.google-apps.document"
         }
         
-        create_result = _run_google_workspace_cli(
+        create_result = await asyncio.to_thread(
+            _run_google_workspace_cli,
             [
                 "drive",
                 "files",
@@ -1056,7 +1065,7 @@ def create_google_doc_with_text(title: str, text: str, tool_context: ToolContext
                 logger.warning(f"Failed to delete temp file {temp_filename}: {ce}")
 
 
-def read_google_sheet_range(spreadsheet_id: str, range_name: str, tool_context: ToolContext) -> dict:
+async def read_google_sheet_range(spreadsheet_id: str, range_name: str, tool_context: ToolContext) -> dict:
     """
     Read values from a Google Sheets range using gws sheets +read.
     """
@@ -1065,7 +1074,8 @@ def read_google_sheet_range(spreadsheet_id: str, range_name: str, tool_context: 
     if not range_name or not range_name.strip():
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "range_name is required."}
 
-    return _run_google_workspace_cli(
+    return await asyncio.to_thread(
+        _run_google_workspace_cli,
         [
             "sheets",
             "+read",
@@ -1078,7 +1088,7 @@ def read_google_sheet_range(spreadsheet_id: str, range_name: str, tool_context: 
     )
 
 
-def append_google_sheet_rows(spreadsheet_id: str, values_json: str, tool_context: ToolContext) -> dict:
+async def append_google_sheet_rows(spreadsheet_id: str, values_json: str, tool_context: ToolContext) -> dict:
     """
     Append rows to a Google Sheet using gws sheets +append.
 
@@ -1097,7 +1107,8 @@ def append_google_sheet_rows(spreadsheet_id: str, values_json: str, tool_context
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "values_json must be a non-empty JSON array."}
 
     rows = values if isinstance(values[0], list) else [values]
-    return _run_google_workspace_cli(
+    return await asyncio.to_thread(
+        _run_google_workspace_cli,
         [
             "sheets",
             "+append",
@@ -1110,7 +1121,7 @@ def append_google_sheet_rows(spreadsheet_id: str, values_json: str, tool_context
     )
 
 
-def create_google_sheet_with_rows(title: str, values_json: str, tool_context: ToolContext) -> dict:
+async def create_google_sheet_with_rows(title: str, values_json: str, tool_context: ToolContext) -> dict:
     """
     Create a Google Sheets spreadsheet and append rows.
 
@@ -1126,7 +1137,8 @@ def create_google_sheet_with_rows(title: str, values_json: str, tool_context: To
     if not values:
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "values_json must be a non-empty JSON array."}
 
-    create_result = _run_google_workspace_cli(
+    create_result = await asyncio.to_thread(
+        _run_google_workspace_cli,
         [
             "sheets",
             "spreadsheets",
@@ -1154,7 +1166,7 @@ def create_google_sheet_with_rows(title: str, values_json: str, tool_context: To
             "details": create_result,
         }
 
-    append_result = append_google_sheet_rows(
+    append_result = await append_google_sheet_rows(
         spreadsheet_id=spreadsheet_id,
         values_json=json.dumps(values, ensure_ascii=False),
         tool_context=tool_context,
@@ -1185,7 +1197,7 @@ def create_google_sheet_with_rows(title: str, values_json: str, tool_context: To
     }
 
 
-def list_google_calendar_events(
+async def list_google_calendar_events(
     tool_context: ToolContext,
     days: int = 7,
     calendar: str = "",
@@ -1201,7 +1213,7 @@ def list_google_calendar_events(
             args += ["--calendar", calendar.strip()]
         if timezone and isinstance(timezone, str) and timezone.strip():
             args += ["--timezone", timezone.strip()]
-        return _run_google_workspace_cli(args, tool_context)
+        return await asyncio.to_thread(_run_google_workspace_cli, args, tool_context)
     except Exception as e:
         logger.exception("list_google_calendar_events failed unexpectedly.")
         return {
@@ -1210,7 +1222,7 @@ def list_google_calendar_events(
         }
 
 
-def create_google_calendar_event(
+async def create_google_calendar_event(
     summary: str,
     start: str,
     end: str,
@@ -1268,7 +1280,7 @@ def create_google_calendar_event(
         if add_meet:
             args.append("--meet")
 
-        return _run_google_workspace_cli(args, tool_context)
+        return await asyncio.to_thread(_run_google_workspace_cli, args, tool_context)
     except Exception as e:
         logger.exception("create_google_calendar_event failed unexpectedly.")
         return {
@@ -1504,7 +1516,7 @@ def get_lark_operation_schema(method_path: str, tool_context: ToolContext) -> di
     }
 
 
-def execute_lark_cli(
+async def execute_lark_cli(
     args_json: str,
     tool_context: ToolContext,
     dry_run: bool = True,
@@ -1532,7 +1544,8 @@ def execute_lark_cli(
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: str(e)}
 
     timeout_seconds = _safe_limit(timeout_seconds, default=120, minimum=10, maximum=300)
-    result = _run_lark_cli(args, tool_context, timeout_seconds=timeout_seconds)
+    # to_thread：CLI 子进程秒级 IO，期间释放事件循环（ADK 同步调用不自动线程化）
+    result = await asyncio.to_thread(_run_lark_cli, args, tool_context, timeout_seconds=timeout_seconds)
     
     if command_spec:
         result = dict(result)
@@ -1542,7 +1555,7 @@ def execute_lark_cli(
     return result
 
 
-def execute_lark_cli_flat(
+async def execute_lark_cli_flat(
     service: str,
     resource: str,
     method: str,
@@ -1617,7 +1630,8 @@ def execute_lark_cli_flat(
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: str(e)}
 
     timeout_seconds = _safe_limit(timeout_seconds, default=120, minimum=10, maximum=300)
-    result = _run_lark_cli(args, tool_context, timeout_seconds=timeout_seconds)
+    # to_thread：CLI 子进程秒级 IO，期间释放事件循环（ADK 同步调用不自动线程化）
+    result = await asyncio.to_thread(_run_lark_cli, args, tool_context, timeout_seconds=timeout_seconds)
     
     if command_spec:
         result = dict(result)
@@ -1627,7 +1641,7 @@ def execute_lark_cli_flat(
     return result
 
 
-def query_lark_documents(query: str, tool_context: ToolContext) -> dict:
+async def query_lark_documents(query: str, tool_context: ToolContext) -> dict:
     """
     Queries Lark documents for the authenticated user.
 
@@ -1659,7 +1673,10 @@ def query_lark_documents(query: str, tool_context: ToolContext) -> dict:
                 MESSAGE_KEY: "Access token is missing. Please ensure OAuth is configured.",
             }
 
-        documents = lark_api_repository.search_documents(access_token, query)
+        # to_thread：搜索 HTTP 期间释放事件循环
+        documents = await asyncio.to_thread(
+            lark_api_repository.search_documents, access_token, query
+        )
 
         # 生成带预览的文档列表（美观格式）
         # 格式：每个文档包含标题、链接和内容预览（如果有）
@@ -1695,7 +1712,8 @@ def query_lark_documents(query: str, tool_context: ToolContext) -> dict:
                 # 只处理文档类型（doc/docx），其他类型（sheet、file等）不支持内容预览
                 if idx < 5 and doc_token and doc_type in ["doc", "docx"]:
                     try:
-                        preview_text = lark_api_repository.get_document_preview(
+                        preview_text = await asyncio.to_thread(
+                            lark_api_repository.get_document_preview,
                             access_token,
                             doc_token,
                             doc_type,
@@ -1796,9 +1814,12 @@ async def get_lark_document_markdown(
                 MESSAGE_KEY: "Access token is missing. Please ensure OAuth is configured.",
             }
 
-        # 调用底层 docs_ai fetch API 拉取 Markdown
-        content = lark_api_repository.get_document_markdown(
-            access_token, doc_token
+        # 调用底层 docs_ai fetch API 拉取 Markdown（to_thread：HTTP 期间释放事件循环，
+        # 避免高并发下阻塞其他请求——ADK 同步调用不自动线程化）
+        content = await asyncio.to_thread(
+            lark_api_repository.get_document_markdown,
+            access_token,
+            doc_token,
         )
 
         if not content:
@@ -1827,7 +1848,10 @@ async def get_lark_document_markdown(
                             req_headers = headers
 
                         # 🌟 5秒极短超时，防止由于网络原因或飞书流失效拖垮主流程
-                        response = _session.get(img_url, headers=req_headers, timeout=5)
+                        # （to_thread：图片下载不阻塞事件循环，多图串行下载期间其他请求照常调度）
+                        response = await asyncio.to_thread(
+                            _session.get, img_url, headers=req_headers, timeout=5
+                        )
                         if response.status_code == 200:
                             img_bytes = response.content
                             mime_type = response.headers.get("Content-Type", "image/jpeg")
@@ -1891,7 +1915,7 @@ async def get_lark_document_markdown(
         }
 
 
-def get_lark_document_content_pdf(
+async def get_lark_document_content_pdf(
     doc_token: str, tool_context: ToolContext, doc_type: str = "docx"
 ) -> dict:
     """
@@ -1911,9 +1935,12 @@ def get_lark_document_content_pdf(
         if not access_token:
             return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "Authentication required."}
 
-        # 1. 权限预检
-        perm_result = lark_api_repository.check_document_permission(
-            access_token, doc_token, doc_type
+        # 1. 权限预检（to_thread：导出前 HTTP 预检不阻塞事件循环）
+        perm_result = await asyncio.to_thread(
+            lark_api_repository.check_document_permission,
+            access_token,
+            doc_token,
+            doc_type,
         )
         if not perm_result.get("has_export_permission"):
             error_msg = (
@@ -1926,9 +1953,12 @@ def get_lark_document_content_pdf(
                 "debug_info": perm_result,
             }
 
-        # 2. 导出为 PDF (现在返回原始 bytes)
-        pdf_bytes = lark_api_repository.get_document_as_pdf(
-            access_token, doc_token, doc_type
+        # 2. 导出为 PDF（to_thread：导出任务轮询+下载秒级 IO，期间释放事件循环）
+        pdf_bytes = await asyncio.to_thread(
+            lark_api_repository.get_document_as_pdf,
+            access_token,
+            doc_token,
+            doc_type,
         )
 
         if not pdf_bytes:
@@ -1965,7 +1995,7 @@ def get_lark_document_content_pdf(
         }
 
 
-def get_lark_document_content_docx(
+async def get_lark_document_content_docx(
     doc_token: str, tool_context: ToolContext, doc_type: str = "docx"
 ) -> dict:
     """
@@ -1985,9 +2015,12 @@ def get_lark_document_content_docx(
         if not access_token:
             return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "Authentication required."}
 
-        # 1. 权限预检
-        perm_result = lark_api_repository.check_document_permission(
-            access_token, doc_token, doc_type
+        # 1. 权限预检（to_thread：导出前 HTTP 预检不阻塞事件循环）
+        perm_result = await asyncio.to_thread(
+            lark_api_repository.check_document_permission,
+            access_token,
+            doc_token,
+            doc_type,
         )
         if not perm_result.get("has_export_permission"):
             error_msg = (
@@ -2000,9 +2033,12 @@ def get_lark_document_content_docx(
                 "debug_info": perm_result,
             }
 
-        # 2. 导出为 Word
-        docx_bytes = lark_api_repository.get_document_as_docx(
-            access_token, doc_token, doc_type
+        # 2. 导出为 Word（to_thread：导出任务轮询+下载秒级 IO，期间释放事件循环）
+        docx_bytes = await asyncio.to_thread(
+            lark_api_repository.get_document_as_docx,
+            access_token,
+            doc_token,
+            doc_type,
         )
 
         if not docx_bytes:
@@ -2060,9 +2096,12 @@ async def get_lark_document_rich_content(
         if not access_token:
             return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "Authentication required."}
 
-        # 1. 权限预检
-        perm_result = lark_api_repository.check_document_permission(
-            access_token, doc_token, doc_type
+        # 1. 权限预检（to_thread：HTTP 期间释放事件循环）
+        perm_result = await asyncio.to_thread(
+            lark_api_repository.check_document_permission,
+            access_token,
+            doc_token,
+            doc_type,
         )
         if not perm_result.get("has_export_permission"):
             error_msg = (
@@ -2075,9 +2114,12 @@ async def get_lark_document_rich_content(
                 "debug_info": perm_result,
             }
 
-        # 2. 获取富文本内容
-        result = lark_api_repository.get_document_rich_text_by_block(
-            access_token, doc_token, doc_type
+        # 2. 获取富文本内容（to_thread：内部含图片下载，秒级 IO 不阻塞事件循环）
+        result = await asyncio.to_thread(
+            lark_api_repository.get_document_rich_text_by_block,
+            access_token,
+            doc_token,
+            doc_type,
         )
 
         repo_parts = result.get("parts", [])
@@ -2183,7 +2225,7 @@ async def get_lark_document_rich_content(
         }
 
 
-def create_lark_document(
+async def create_lark_document(
     title: str, markdown_content: str, tool_context: ToolContext, folder_token: str = ""
 ) -> dict:
     """
@@ -2207,14 +2249,17 @@ def create_lark_document(
         if folder_token:
             args += ["--folder-token", folder_token]
 
-        result = cli_client.run_command("docs", "+create", args, access_token, LARK_CLIENT_ID)
+        # to_thread：CLI 子进程秒级 IO，期间释放事件循环（ADK 不自动线程化同步调用）
+        result = await asyncio.to_thread(
+            cli_client.run_command, "docs", "+create", args, access_token, LARK_CLIENT_ID
+        )
         return result
     except Exception as e:
         logger.error(f"Failed to create Lark document: {str(e)}")
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: str(e)}
 
 
-def update_lark_document(
+async def update_lark_document(
     doc_token: str, markdown_content: str, tool_context: ToolContext, mode: str = "append"
 ) -> dict:
     """
@@ -2235,14 +2280,16 @@ def update_lark_document(
             return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "Authentication required."}
 
         args = ["--doc", doc_token, "--markdown", markdown_content, "--mode", mode]
-        result = cli_client.run_command("docs", "+update", args, access_token, LARK_CLIENT_ID)
+        result = await asyncio.to_thread(
+            cli_client.run_command, "docs", "+update", args, access_token, LARK_CLIENT_ID
+        )
         return result
     except Exception as e:
         logger.error(f"Failed to update Lark document: {str(e)}")
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: str(e)}
 
 
-def delete_lark_document(
+async def delete_lark_document(
     doc_token: str, tool_context: ToolContext, doc_type: str = "docx"
 ) -> dict:
     """
@@ -2276,8 +2323,9 @@ def delete_lark_document(
 
         # 使用正确的参数名 --file-token，并添加 --yes 跳过交互式确认
         args = ["--file-token", doc_token, "--type", cli_type, "--yes"]
-        result = cli_client.run_command(
-            "drive", "+delete", args, access_token, LARK_CLIENT_ID
+        result = await asyncio.to_thread(
+            cli_client.run_command,
+            "drive", "+delete", args, access_token, LARK_CLIENT_ID,
         )
         return result
     except Exception as e:
@@ -2285,7 +2333,7 @@ def delete_lark_document(
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: str(e)}
 
 
-def execute_lark_api(
+async def execute_lark_api(
     method: str,
     path: str,
     tool_context: ToolContext,
@@ -2347,14 +2395,16 @@ def execute_lark_api(
                 }
             args += ["--file", file_clean]
 
-        return cli_client.run_command("api", "", args, access_token, LARK_CLIENT_ID)
+        return await asyncio.to_thread(
+            cli_client.run_command, "api", "", args, access_token, LARK_CLIENT_ID
+        )
     except Exception as e:
         logger.error(f"Universal API call failed: {str(e)}")
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: str(e)}
 
 
 
-def feishu_mcp_create_doc(
+async def feishu_mcp_create_doc(
     title: str = "",
     markdown: str = "",
     tool_context: ToolContext = None,
@@ -2407,7 +2457,9 @@ def feishu_mcp_create_doc(
         if wiki_space:
             args["wiki_space"] = wiki_space
 
-        result = lark_api_repository.call_feishu_mcp_tool(access_token, "create-doc", args)
+        result = await asyncio.to_thread(
+            lark_api_repository.call_feishu_mcp_tool, access_token, "create-doc", args
+        )
         data = result.get("data") if isinstance(result.get("data"), dict) else result
         response = {STATUS_KEY: STATUS_SUCCESS, "raw_result": result}
         for key in ("doc_id", "doc_url", "message", "task_id", "log_id", "warnings"):
@@ -2421,7 +2473,7 @@ def feishu_mcp_create_doc(
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: str(e)}
 
 
-def save_ai_output_to_feishu_doc(
+async def save_ai_output_to_feishu_doc(
     title: str,
     markdown_content: str,
     tool_context: ToolContext,
@@ -2443,7 +2495,7 @@ def save_ai_output_to_feishu_doc(
             MESSAGE_KEY: "markdown_content is required.",
         }
 
-    result = feishu_mcp_create_doc(
+    result = await feishu_mcp_create_doc(
         title=title,
         markdown=markdown_content,
         tool_context=tool_context,
@@ -2473,7 +2525,7 @@ def save_ai_output_to_feishu_doc(
     return normalized
 
 
-def save_ai_output_to_existing_feishu_doc(
+async def save_ai_output_to_existing_feishu_doc(
     doc_id: str,
     markdown_content: str,
     tool_context: ToolContext,
@@ -2497,7 +2549,7 @@ def save_ai_output_to_existing_feishu_doc(
             MESSAGE_KEY: "markdown_content is required for the selected mode.",
         }
 
-    result = feishu_mcp_update_doc(
+    result = await feishu_mcp_update_doc(
         doc_id=doc_id,
         markdown=markdown_content,
         tool_context=tool_context,
@@ -2525,7 +2577,7 @@ def save_ai_output_to_existing_feishu_doc(
     return normalized
 
 
-def wait_for_feishu_doc_create_task(
+async def wait_for_feishu_doc_create_task(
     task_id: str,
     tool_context: ToolContext,
     max_polls: int = 10,
@@ -2533,9 +2585,10 @@ def wait_for_feishu_doc_create_task(
 ):
     """[ADK 原生长任务] 轮询此前提交的 create-doc 异步任务直至完成。
 
-    基于 ADK 2.x LongRunningFunctionTool 机制：轮询期间每次 yield 的进度
-    快照会作为中间事件流式推送给用户（GE 侧实时可见），最终 return 值
-    才是任务的最终 FunctionResponse，无需模型反复手动重试调用。
+    基于 ADK 2.x LongRunningFunctionTool 机制（异步生成器）：轮询期间每次
+    yield 的进度快照会作为中间事件流式推送给用户（GE 侧实时可见），最后
+    一次 yield 的最终结果即为任务的 FunctionResponse，无需模型反复手动重试
+    调用。轮询等待用 asyncio.sleep，完全释放事件循环（高并发零阻塞）。
 
     Args:
         task_id: create-doc 返回的异步任务 ID。
@@ -2544,44 +2597,48 @@ def wait_for_feishu_doc_create_task(
         poll_interval_seconds: 轮询间隔秒数，默认 1.0。
 
     Yields:
-        dict: 每轮轮询的进度快照（completed=False，poll_attempts 为当前次数）。
-
-    Returns:
-        dict: 最终结果。completed=True 时携带 doc_id/doc_url 等字段；
-              completed=False 表示在轮询窗口内任务仍未完成。
+        dict: 中间为进度快照（completed=False），最后一次 yield 为最终结果
+              （completed=True 携带 doc_id/doc_url 等字段；completed=False
+              表示在轮询窗口内任务仍未完成）。
     """
     if not task_id.strip():
-        return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "task_id is required."}
+        yield {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "task_id is required."}
+        return
     if max_polls < 1:
-        return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "max_polls must be >= 1."}
+        yield {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "max_polls must be >= 1."}
+        return
 
     last_result = None
     for attempt in range(1, max_polls + 1):
-        result = feishu_mcp_create_doc(
+        result = await feishu_mcp_create_doc(
             task_id=task_id,
             tool_context=tool_context,
         )
         last_result = result
         if result.get(STATUS_KEY) != STATUS_SUCCESS:
-            return result
+            yield result
+            return
         if not result.get("task_id"):
             result["completed"] = True
             result["poll_attempts"] = attempt
             result["summary"] = (
                 f"Create task '{task_id}' completed after {attempt} poll(s)."
             )
-            return result
+            yield result
+            return
         yield {
             STATUS_KEY: STATUS_SUCCESS,
             "completed": False,
             "task_id": task_id,
             "poll_attempts": attempt,
-            "progress": f"Create task is running ({attempt}/{max_polls} polls)...",
+            "progress": f"Create task is running ({attempt}/{max_polls})...",
         }
         if attempt < max_polls:
-            time.sleep(poll_interval_seconds)
+            # 异步生成器 + asyncio.sleep：轮询等待期间完全释放事件循环，
+            # 高并发下不阻塞其他请求（同步 time.sleep 会卡死整个 Agent 循环）
+            await asyncio.sleep(poll_interval_seconds)
 
-    return {
+    yield {
         STATUS_KEY: STATUS_SUCCESS,
         "completed": False,
         "task_id": task_id,
@@ -2594,7 +2651,7 @@ def wait_for_feishu_doc_create_task(
     }
 
 
-def wait_for_feishu_doc_update_task(
+async def wait_for_feishu_doc_update_task(
     task_id: str,
     tool_context: ToolContext,
     max_polls: int = 10,
@@ -2602,9 +2659,10 @@ def wait_for_feishu_doc_update_task(
 ):
     """[ADK 原生长任务] 轮询此前提交的 update-doc 异步任务直至完成。
 
-    基于 ADK 2.x LongRunningFunctionTool 机制：轮询期间每次 yield 的进度
-    快照会作为中间事件流式推送给用户（GE 侧实时可见），最终 return 值
-    才是任务的最终 FunctionResponse，无需模型反复手动重试调用。
+    基于 ADK 2.x LongRunningFunctionTool 机制（异步生成器）：轮询期间每次
+    yield 的进度快照会作为中间事件流式推送给用户（GE 侧实时可见），最后
+    一次 yield 的最终结果即为任务的 FunctionResponse。轮询等待用
+    asyncio.sleep，完全释放事件循环（高并发零阻塞）。
 
     Args:
         task_id: update-doc 返回的异步任务 ID。
@@ -2613,44 +2671,47 @@ def wait_for_feishu_doc_update_task(
         poll_interval_seconds: 轮询间隔秒数，默认 1.0。
 
     Yields:
-        dict: 每轮轮询的进度快照（completed=False，poll_attempts 为当前次数）。
-
-    Returns:
-        dict: 最终结果。completed=True 时携带 doc_id/doc_url 等字段；
-              completed=False 表示在轮询窗口内任务仍未完成。
+        dict: 中间为进度快照（completed=False），最后一次 yield 为最终结果
+              （completed=True 携带 doc_id/doc_url 等字段；completed=False
+              表示在轮询窗口内任务仍未完成）。
     """
     if not task_id.strip():
-        return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "task_id is required."}
+        yield {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "task_id is required."}
+        return
     if max_polls < 1:
-        return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "max_polls must be >= 1."}
+        yield {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "max_polls must be >= 1."}
+        return
 
     last_result = None
     for attempt in range(1, max_polls + 1):
-        result = feishu_mcp_update_doc(
+        result = await feishu_mcp_update_doc(
             task_id=task_id,
             tool_context=tool_context,
         )
         last_result = result
         if result.get(STATUS_KEY) != STATUS_SUCCESS:
-            return result
+            yield result
+            return
         if not result.get("task_id"):
             result["completed"] = True
             result["poll_attempts"] = attempt
             result["summary"] = (
                 f"Update task '{task_id}' completed after {attempt} poll(s)."
             )
-            return result
+            yield result
+            return
         yield {
             STATUS_KEY: STATUS_SUCCESS,
             "completed": False,
             "task_id": task_id,
             "poll_attempts": attempt,
-            "progress": f"Update task is running ({attempt}/{max_polls} polls)...",
+            "progress": f"Update task is running ({attempt}/{max_polls})...",
         }
         if attempt < max_polls:
-            time.sleep(poll_interval_seconds)
+            # 异步生成器 + asyncio.sleep：轮询等待期间完全释放事件循环
+            await asyncio.sleep(poll_interval_seconds)
 
-    return {
+    yield {
         STATUS_KEY: STATUS_SUCCESS,
         "completed": False,
         "task_id": task_id,
@@ -2668,7 +2729,7 @@ wait_for_feishu_doc_create_task_tool = LongRunningFunctionTool(wait_for_feishu_d
 wait_for_feishu_doc_update_task_tool = LongRunningFunctionTool(wait_for_feishu_doc_update_task)
 
 
-def feishu_mcp_update_doc(
+async def feishu_mcp_update_doc(
     doc_id: str = "",
     markdown: str = "",
     tool_context: ToolContext = None,
@@ -2718,7 +2779,9 @@ def feishu_mcp_update_doc(
             if new_title:
                 args["new_title"] = new_title
 
-        result = lark_api_repository.call_feishu_mcp_tool(access_token, "update-doc", args)
+        result = await asyncio.to_thread(
+            lark_api_repository.call_feishu_mcp_tool, access_token, "update-doc", args
+        )
         data = result.get("data") if isinstance(result.get("data"), dict) else result
         response = {STATUS_KEY: STATUS_SUCCESS, "raw_result": result}
         for key in (
@@ -2741,7 +2804,7 @@ def feishu_mcp_update_doc(
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: str(e)}
 
 
-def feishu_mcp_fetch_doc(
+async def feishu_mcp_fetch_doc(
     doc_id: str, tool_context: ToolContext, offset: int = 0, limit: int = 50000
 ) -> dict:
     """
@@ -2762,7 +2825,9 @@ def feishu_mcp_fetch_doc(
             return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "Auth required."}
 
         args = {"doc_id": doc_id, "offset": offset, "limit": limit}
-        result = lark_api_repository.call_feishu_mcp_tool(access_token, "fetch-doc", args)
+        result = await asyncio.to_thread(
+            lark_api_repository.call_feishu_mcp_tool, access_token, "fetch-doc", args
+        )
         data = result.get("data") if isinstance(result.get("data"), dict) else result
         response = {STATUS_KEY: STATUS_SUCCESS, "raw_result": result}
         for key in ("doc_id", "title", "markdown", "content", "message", "has_more", "next_offset"):
@@ -2805,9 +2870,11 @@ async def render_image_as_artifact(
                 headers["Authorization"] = f"Bearer {access_token}"
                 logger.info("[render_image_as_artifact] Adding Lark bearer token for downloading image.")
 
-        # 2. 从临时链接下载
+        # 2. 从临时链接下载（to_thread：下载最长 30s，期间必须释放事件循环）
         from nexus_agent.infrastructure.lark_api_repository import _session
-        response = _session.get(image_url, headers=headers, timeout=30)
+        response = await asyncio.to_thread(
+            _session.get, image_url, headers=headers, timeout=30
+        )
         
         if response.status_code != 200:
             logger.error(f"[render_image_as_artifact] Failed to download image from {image_url}. Status: {response.status_code}")

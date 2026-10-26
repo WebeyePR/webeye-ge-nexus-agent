@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 
@@ -67,7 +68,7 @@ def test_normalize_markdown_for_new_doc_removes_duplicate_leading_h1():
 
 
 def test_save_ai_output_to_feishu_doc_returns_clean_summary(monkeypatch):
-    def fake_create_doc(**kwargs):
+    async def fake_create_doc(**kwargs):
         return {
             "status": "success",
             "doc_id": "doxcn123",
@@ -77,11 +78,11 @@ def test_save_ai_output_to_feishu_doc_returns_clean_summary(monkeypatch):
 
     monkeypatch.setattr(lark_tools, "feishu_mcp_create_doc", fake_create_doc)
 
-    result = lark_tools.save_ai_output_to_feishu_doc(
+    result = asyncio.run(lark_tools.save_ai_output_to_feishu_doc(
         title="周报",
         markdown_content="## 本周进展\n- 已完成",
         tool_context="fake-token",
-    )
+    ))
 
     assert result["status"] == "success"
     assert result["doc_id"] == "doxcn123"
@@ -90,7 +91,7 @@ def test_save_ai_output_to_feishu_doc_returns_clean_summary(monkeypatch):
 
 
 def test_save_ai_output_to_existing_feishu_doc_returns_clean_summary(monkeypatch):
-    def fake_update_doc(**kwargs):
+    async def fake_update_doc(**kwargs):
         return {
             "status": "success",
             "doc_id": "doxcn123",
@@ -100,11 +101,11 @@ def test_save_ai_output_to_existing_feishu_doc_returns_clean_summary(monkeypatch
 
     monkeypatch.setattr(lark_tools, "feishu_mcp_update_doc", fake_update_doc)
 
-    result = lark_tools.save_ai_output_to_existing_feishu_doc(
+    result = asyncio.run(lark_tools.save_ai_output_to_existing_feishu_doc(
         doc_id="doxcn123",
         markdown_content="## 新内容\n- 已完成",
         tool_context="fake-token",
-    )
+    ))
 
     assert result["status"] == "success"
     assert result["doc_id"] == "doxcn123"
@@ -113,30 +114,32 @@ def test_save_ai_output_to_existing_feishu_doc_returns_clean_summary(monkeypatch
 
 
 def test_save_ai_output_to_existing_feishu_doc_requires_doc_id():
-    result = lark_tools.save_ai_output_to_existing_feishu_doc(
+    result = asyncio.run(lark_tools.save_ai_output_to_existing_feishu_doc(
         doc_id="",
         markdown_content="content",
         tool_context="fake-token",
-    )
+    ))
 
     assert result["status"] == "error"
     assert result["message"] == "doc_id is required."
 
 
-def _run_long_running(gen):
-    """驱动长任务生成器：收集 yield 的进度快照，返回 (progress, final_result)。"""
-    progress = []
-    try:
-        while True:
-            progress.append(next(gen))
-    except StopIteration as stop:
-        return progress, stop.value
+def _run_long_running(agen):
+    """驱动长任务异步生成器：收集 yield 项，最后一项为最终结果，其余为进度。"""
+
+    async def _drive():
+        items = []
+        async for item in agen:
+            items.append(item)
+        return items[:-1], items[-1]
+
+    return asyncio.run(_drive())
 
 
 def test_wait_for_feishu_doc_create_task_completes_after_second_poll(monkeypatch):
     calls = {"count": 0}
 
-    def fake_create_doc(**kwargs):
+    async def fake_create_doc(**kwargs):
         calls["count"] += 1
         if calls["count"] == 1:
             return {
@@ -171,7 +174,7 @@ def test_wait_for_feishu_doc_create_task_completes_after_second_poll(monkeypatch
 
 
 def test_wait_for_feishu_doc_update_task_returns_running_after_timeout(monkeypatch):
-    def fake_update_doc(**kwargs):
+    async def fake_update_doc(**kwargs):
         return {
             "status": "success",
             "task_id": "task_456",
@@ -206,13 +209,13 @@ def test_execute_lark_api_uses_json_string_args(monkeypatch):
 
     monkeypatch.setattr(lark_tools.cli_client, "run_command", fake_run_command)
 
-    result = lark_tools.execute_lark_api(
+    result = asyncio.run(lark_tools.execute_lark_api(
         method="GET",
         path="/open-apis/calendar/v4/calendars",
         params_json='{"page_size":10}',
         data_json='{"name":"team"}',
         tool_context="fake-token",
-    )
+    ))
 
     assert result["status"] == "success"
     assert captured["service"] == "api"
@@ -227,12 +230,12 @@ def test_execute_lark_api_uses_json_string_args(monkeypatch):
 
 
 def test_execute_lark_api_rejects_invalid_json_string():
-    result = lark_tools.execute_lark_api(
+    result = asyncio.run(lark_tools.execute_lark_api(
         method="POST",
         path="/open-apis/test",
         params_json="{bad-json}",
         tool_context="fake-token",
-    )
+    ))
 
     assert result["status"] == "error"
     assert "must be a valid, standard JSON string" in result["message"]

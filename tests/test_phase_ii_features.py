@@ -109,11 +109,11 @@ def test_create_google_doc_with_text_html_conversion_and_cleanup(monkeypatch):
 
     # Call the tool with markdown text
     markdown_text = "# My Title\n## My Subtitle\n- Item 1\n- Item 2\n\nSome text with **bold**."
-    result = lark_tools.create_google_doc_with_text(
+    result = asyncio.run(lark_tools.create_google_doc_with_text(
         title="My Epic Document",
         text=markdown_text,
         tool_context="gws-token"
-    )
+    ))
 
     # Verify response
     assert result["status"] == "success"
@@ -200,28 +200,28 @@ def test_extreme_args_length_and_injection():
     # 1. 验证超长参数拦截（>20000 字节）
     long_arg = "a" * 20001
     bad_args_json = f'["docs", "+fetch", "{long_arg}"]'
-    result = lark_tools.execute_lark_cli(
+    result = asyncio.run(lark_tools.execute_lark_cli(
         args_json=bad_args_json,
         tool_context="fake-ctx"
-    )
+    ))
     assert result["status"] == "error"
     assert "too long" in result["message"]
 
     # 2. 验证控制字符 \x00 (Null Byte) 截断攻击拦截
     null_byte_args_json = '["docs", "+fetch", "some\\u0000arg"]'
-    result2 = lark_tools.execute_lark_cli(
+    result2 = asyncio.run(lark_tools.execute_lark_cli(
         args_json=null_byte_args_json,
         tool_context="fake-ctx"
-    )
+    ))
     assert result2["status"] == "error"
     assert "control characters" in result2["message"]
 
     # 3. 验证控制字符 \n, \r 换行注入拦截
     newline_args_json = '["docs", "+fetch", "some\\narg"]'
-    result3 = lark_tools.execute_lark_cli(
+    result3 = asyncio.run(lark_tools.execute_lark_cli(
         args_json=newline_args_json,
         tool_context="fake-ctx"
-    )
+    ))
     assert result3["status"] == "error"
     assert "control characters" in result3["message"]
 
@@ -232,28 +232,28 @@ def test_path_traversal_and_blocked_flags():
     """
     # 1. 验证绝对路径拦截
     abs_path_args = '["docs", "+fetch", "/etc/passwd"]'
-    result1 = lark_tools.execute_lark_cli(
+    result1 = asyncio.run(lark_tools.execute_lark_cli(
         args_json=abs_path_args,
         tool_context="fake-ctx"
-    )
+    ))
     assert result1["status"] == "error"
     assert "Absolute paths" in result1["message"]
 
     # 2. 验证路径穿越拦截
     traversal_args = '["docs", "+fetch", "../../etc/passwd"]'
-    result2 = lark_tools.execute_lark_cli(
+    result2 = asyncio.run(lark_tools.execute_lark_cli(
         args_json=traversal_args,
         tool_context="fake-ctx"
-    )
+    ))
     assert result2["status"] == "error"
     assert "parent-directory traversal" in result2["message"]
 
     # 3. 验证命令行高危黑名单 Flag 拦截
     blocked_flag_args = '["docs", "+fetch", "--credentials-file", "pass.json"]'
-    result3 = lark_tools.execute_lark_cli(
+    result3 = asyncio.run(lark_tools.execute_lark_cli(
         args_json=blocked_flag_args,
         tool_context="fake-ctx"
-    )
+    ))
     assert result3["status"] == "error"
     assert "not allowed" in result3["message"]
 
@@ -301,28 +301,28 @@ def test_invalid_argument_formats_and_types():
     """
     # 1. 验证参数列表非 string（例如含有数字）
     invalid_type_args = '["docs", "+fetch", 12345]'
-    result1 = lark_tools.execute_lark_cli(
+    result1 = asyncio.run(lark_tools.execute_lark_cli(
         args_json=invalid_type_args,
         tool_context="fake-ctx"
-    )
+    ))
     assert result1["status"] == "error"
     assert "strings only" in result1["message"]
 
     # 2. 验证空 JSON 数组
     empty_args = '[]'
-    result2 = lark_tools.execute_lark_cli(
+    result2 = asyncio.run(lark_tools.execute_lark_cli(
         args_json=empty_args,
         tool_context="fake-ctx"
-    )
+    ))
     assert result2["status"] == "error"
     assert "non-empty JSON array" in result2["message"]
 
     # 3. 验证非 JSON 格式畸形字符串
     bad_json_string = '{"service": "docs"}'
-    result3 = lark_tools.execute_lark_cli(
+    result3 = asyncio.run(lark_tools.execute_lark_cli(
         args_json=bad_json_string,
         tool_context="fake-ctx"
-    )
+    ))
     assert result3["status"] == "error"
     assert "must be a JSON array string" in result3["message"]
 

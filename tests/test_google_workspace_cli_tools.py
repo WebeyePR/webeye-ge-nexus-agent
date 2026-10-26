@@ -1,3 +1,4 @@
+import asyncio
 import os
 import stat
 import sys
@@ -18,11 +19,11 @@ def test_search_google_drive_files_builds_safe_gws_command(monkeypatch):
 
     monkeypatch.setattr(lark_tools.gws_cli_client, "run_command", fake_run_command)
 
-    result = lark_tools.search_google_drive_files(
+    result = asyncio.run(lark_tools.search_google_drive_files(
         query="quarterly report",
         tool_context="google-token",
         page_size=100,
-    )
+    ))
 
     assert result["status"] == "success"
     assert captured["access_token"] == "google-token"
@@ -36,7 +37,7 @@ def test_google_workspace_tool_reports_missing_auth_token():
     class Context:
         state = {}
 
-    result = lark_tools.search_google_drive_files("report", Context())
+    result = asyncio.run(lark_tools.search_google_drive_files("report", Context()))
 
     assert result["status"] == "error"
     assert "Google Workspace authentication required" in result["message"]
@@ -51,11 +52,11 @@ def test_append_google_sheet_rows_accepts_single_row(monkeypatch):
 
     monkeypatch.setattr(lark_tools.gws_cli_client, "run_command", fake_run_command)
 
-    result = lark_tools.append_google_sheet_rows(
+    result = asyncio.run(lark_tools.append_google_sheet_rows(
         spreadsheet_id="sheet123",
         values_json='["name", "score"]',
         tool_context="google-token",
-    )
+    ))
 
     assert result["status"] == "success"
     assert captured["args"][:2] == ["sheets", "+append"]
@@ -71,14 +72,14 @@ def test_create_google_calendar_event_builds_attendee_and_meet_args(monkeypatch)
 
     monkeypatch.setattr(lark_tools.gws_cli_client, "run_command", fake_run_command)
 
-    result = lark_tools.create_google_calendar_event(
+    result = asyncio.run(lark_tools.create_google_calendar_event(
         summary="Review",
         start="2026-06-17T09:00:00+08:00",
         end="2026-06-17T09:30:00+08:00",
         attendees_json='["a@example.com", "b@example.com"]',
         add_meet=True,
         tool_context="google-token",
-    )
+    ))
 
     assert result["status"] == "success"
     assert captured["args"][:2] == ["calendar", "+insert"]
@@ -155,11 +156,11 @@ def test_packaged_cli_resolves_package_bin_only(tmp_path, monkeypatch):
 
 
 def test_append_google_sheet_rows_rejects_invalid_json_array():
-    result = lark_tools.append_google_sheet_rows(
+    result = asyncio.run(lark_tools.append_google_sheet_rows(
         spreadsheet_id="sheet123",
         values_json="{bad-json}",
         tool_context="google-token",
-    )
+    ))
 
     assert result["status"] == "error"
     assert "values_json must be a valid JSON array string" in result["message"]
@@ -208,10 +209,10 @@ def test_get_google_workspace_operation_schema_builds_schema_command(monkeypatch
 
     monkeypatch.setattr(lark_tools.gws_cli_client, "run_command", fake_run_command)
 
-    result = lark_tools.get_google_workspace_operation_schema(
+    result = asyncio.run(lark_tools.get_google_workspace_operation_schema(
         method_path="drive.files.list",
         tool_context="google-token",
-    )
+    ))
 
     assert result["status"] == "success"
     assert captured["args"] == ["schema", "drive.files.list"]
@@ -231,11 +232,11 @@ def test_create_google_doc_with_text_creates_then_writes(monkeypatch):
 
     monkeypatch.setattr(lark_tools.gws_cli_client, "run_command", fake_run_command)
 
-    result = lark_tools.create_google_doc_with_text(
+    result = asyncio.run(lark_tools.create_google_doc_with_text(
         title="Test Doc",
         text="测试内容",
         tool_context="google-token",
-    )
+    ))
 
     assert result["status"] == "success"
     assert result["document_id"] == "doc123"
@@ -248,11 +249,11 @@ def test_create_google_doc_with_text_wraps_write_failure(monkeypatch):
 
     monkeypatch.setattr(lark_tools.gws_cli_client, "run_command", fake_run_command)
 
-    result = lark_tools.create_google_doc_with_text(
+    result = asyncio.run(lark_tools.create_google_doc_with_text(
         title="Test Doc",
         text="测试内容",
         tool_context="google-token",
-    )
+    ))
 
     assert result["status"] == "error"
     assert result["step"] == "upload_and_convert"
@@ -277,11 +278,11 @@ def test_create_google_sheet_with_rows_creates_then_appends(monkeypatch):
 
     monkeypatch.setattr(lark_tools.gws_cli_client, "run_command", fake_run_command)
 
-    result = lark_tools.create_google_sheet_with_rows(
+    result = asyncio.run(lark_tools.create_google_sheet_with_rows(
         title="Test Sheet",
         values_json='[["字段","值"],["测试","通过"]]',
         tool_context="google-token",
-    )
+    ))
 
     assert result["status"] == "success"
     assert result["spreadsheet_id"] == "sheet123"
@@ -300,11 +301,11 @@ def test_execute_google_workspace_cli_runs_safe_read_command(monkeypatch):
 
     monkeypatch.setattr(lark_tools.gws_cli_client, "run_command", fake_run_command)
 
-    result = lark_tools.execute_google_workspace_cli(
+    result = asyncio.run(lark_tools.execute_google_workspace_cli(
         args_json='["drive","files","list","--params","{\\"pageSize\\":10}","--fields","files(id,name)"]',
         tool_context="google-token",
         timeout_seconds=999,
-    )
+    ))
 
     assert result["status"] == "success"
     assert result["command_id"] == "drive.files.list"
@@ -321,11 +322,11 @@ def test_execute_google_workspace_cli_adds_dry_run_for_mutating_command(monkeypa
 
     monkeypatch.setattr(lark_tools.gws_cli_client, "run_command", fake_run_command)
 
-    result = lark_tools.execute_google_workspace_cli(
+    result = asyncio.run(lark_tools.execute_google_workspace_cli(
         args_json='["sheets","spreadsheets","create","--json","{\\"properties\\":{\\"title\\":\\"Demo\\"}}"]',
         tool_context="google-token",
         dry_run=True,
-    )
+    ))
 
     assert result["status"] == "success"
     assert "--dry-run" in captured["args"]
@@ -340,33 +341,33 @@ def test_execute_google_workspace_cli_adds_dry_run_for_write_verbs(monkeypatch):
 
     monkeypatch.setattr(lark_tools.gws_cli_client, "run_command", fake_run_command)
 
-    result = lark_tools.execute_google_workspace_cli(
+    result = asyncio.run(lark_tools.execute_google_workspace_cli(
         args_json='["drive","files","copy","--file-id","file123"]',
         tool_context="google-token",
         dry_run=True,
-    )
+    ))
 
     assert result["status"] == "success"
     assert "--dry-run" in captured["args"]
 
 
 def test_execute_google_workspace_cli_blocks_mutating_command_without_confirmation():
-    result = lark_tools.execute_google_workspace_cli(
+    result = asyncio.run(lark_tools.execute_google_workspace_cli(
         args_json='["gmail","+send","--to","a@example.com","--subject","Hi","--body","Hello"]',
         tool_context="google-token",
         dry_run=False,
         allow_mutating=False,
-    )
+    ))
 
     assert result["status"] == "error"
     assert "appears to mutate data" in result["message"]
 
 
 def test_execute_google_workspace_cli_blocks_unsupported_service():
-    result = lark_tools.execute_google_workspace_cli(
+    result = asyncio.run(lark_tools.execute_google_workspace_cli(
         args_json='["storage","buckets","list"]',
         tool_context="google-token",
-    )
+    ))
 
     assert result["status"] == "error"
     assert "Unsupported gws service" in result["message"]
@@ -384,10 +385,10 @@ def test_discover_google_workspace_operations_rejects_flag_resource():
 
 
 def test_execute_google_workspace_cli_rejects_non_string_args():
-    result = lark_tools.execute_google_workspace_cli(
+    result = asyncio.run(lark_tools.execute_google_workspace_cli(
         args_json='["drive", 123]',
         tool_context="google-token",
-    )
+    ))
 
     assert result["status"] == "error"
     assert "strings only" in result["message"]
@@ -425,13 +426,13 @@ def test_execute_google_workspace_cli_flat_runs_safe_command(monkeypatch):
 
     monkeypatch.setattr(lark_tools.gws_cli_client, "run_command", fake_run_command)
 
-    result = lark_tools.execute_google_workspace_cli_flat(
+    result = asyncio.run(lark_tools.execute_google_workspace_cli_flat(
         service="drive",
         resource="files",
         method="list",
         params_json='{"pageSize": 10}',
         tool_context="google-token",
-    )
+    ))
 
     assert result["status"] == "success"
     assert captured["args"][:3] == ["drive", "files", "list"]
@@ -449,14 +450,14 @@ def test_execute_google_workspace_cli_flat_cleans_json_input(monkeypatch):
     monkeypatch.setattr(lark_tools.gws_cli_client, "run_command", fake_run_command)
 
     # 包含外层多余引号的 JSON 参数
-    result = lark_tools.execute_google_workspace_cli_flat(
+    result = asyncio.run(lark_tools.execute_google_workspace_cli_flat(
         service="sheets",
         resource="spreadsheets",
         method="create",
         json_body='\'{"properties": {"title": "Demo"}}\'',
         tool_context="google-token",
         dry_run=True,
-    )
+    ))
 
     assert result["status"] == "success"
     assert "--json" in captured["args"]
@@ -466,7 +467,7 @@ def test_execute_google_workspace_cli_flat_cleans_json_input(monkeypatch):
 
 
 def test_execute_google_workspace_cli_flat_blocks_mutating_command(monkeypatch):
-    result = lark_tools.execute_google_workspace_cli_flat(
+    result = asyncio.run(lark_tools.execute_google_workspace_cli_flat(
         service="gmail",
         resource="users messages",
         method="send",
@@ -474,7 +475,7 @@ def test_execute_google_workspace_cli_flat_blocks_mutating_command(monkeypatch):
         tool_context="google-token",
         dry_run=False,
         allow_mutating=False,
-    )
+    ))
 
     assert result["status"] == "error"
     assert "appears to mutate data" in result["message"]
@@ -482,38 +483,38 @@ def test_execute_google_workspace_cli_flat_blocks_mutating_command(monkeypatch):
 
 def test_list_google_calendar_events_anticrash():
     # 测试 tool_context = None 时，能够平稳返回 error 字典而不崩溃
-    result = lark_tools.list_google_calendar_events(
+    result = asyncio.run(lark_tools.list_google_calendar_events(
         tool_context=None,
         days=7,
         calendar=None,  # 传入非 string，测试其对 strip() 的类型守卫
         timezone=123,   # 传入非 string，测试其对 strip() 的类型守卫
-    )
+    ))
     assert result["status"] == "error"
     assert "Google Workspace CLI execution failed" in result["message"] or "authentication" in result["message"]
 
 
 def test_create_google_calendar_event_anticrash():
     # 1. 测试 summary, start, end 缺失或为 None 等各种非法输入时的类型守卫与防崩拦截
-    result = lark_tools.create_google_calendar_event(
+    result = asyncio.run(lark_tools.create_google_calendar_event(
         summary=None,
         start="2026-06-17T09:00:00+08:00",
         end="2026-06-17T10:00:00+08:00",
         tool_context="google-token"
-    )
+    ))
     assert result["status"] == "error"
     assert "summary is required" in result["message"]
 
-    result2 = lark_tools.create_google_calendar_event(
+    result2 = asyncio.run(lark_tools.create_google_calendar_event(
         summary="会议",
         start=123,  # 非 str
         end="2026-06-17T10:00:00+08:00",
         tool_context="google-token"
-    )
+    ))
     assert result2["status"] == "error"
     assert "start is required" in result2["message"]
 
     # 2. 测试 tool_context 为 None 时，即使参数正确也绝对不崩溃
-    result3 = lark_tools.create_google_calendar_event(
+    result3 = asyncio.run(lark_tools.create_google_calendar_event(
         summary="会议",
         start="2026-06-17T09:00:00+08:00",
         end="2026-06-17T10:00:00+08:00",
@@ -521,7 +522,7 @@ def test_create_google_calendar_event_anticrash():
         calendar={"invalid": "type"},  # 非 str
         description=["invalid", "desc"],  # 非 str
         location=None,  # None
-    )
+    ))
     assert result3["status"] == "error"
     assert "Google Workspace CLI execution failed" in result3["message"] or "authentication" in result3["message"]
 

@@ -51,7 +51,7 @@ class TestLongRunningTaskTools:
         assert "long-running" in (decl.description or "").lower()
 
     def test_generator_protocol_yield_and_return(self):
-        """生成器协议真实验证：错误输入直接 return，不产生 yield。"""
+        """生成器协议真实验证（异步生成器）：错误输入仅 yield 错误项后立即结束。"""
         from nexus_agent import tools as T
 
         async def scenario():
@@ -67,19 +67,14 @@ class TestLongRunningTaskTools:
                 session=session,
             )
             ctx = ToolContext(ic)
-            gen = T.wait_for_feishu_doc_create_task(task_id="", tool_context=ctx)
-            result = None
-            yielded = []
-            try:
-                while True:
-                    yielded.append(gen.send(None))
-            except StopIteration as stop:
-                result = stop.value
-            return yielded, result
+            agen = T.wait_for_feishu_doc_create_task(task_id="", tool_context=ctx)
+            yielded = [item async for item in agen]
+            return yielded
 
-        yielded, result = asyncio.run(scenario())
-        assert yielded == [], "空 task_id 不应产生进度 yield"
-        assert result == {"status": "error", "message": "task_id is required."}
+        yielded = asyncio.run(scenario())
+        assert yielded == [{"status": "error", "message": "task_id is required."}], (
+            "空 task_id 应仅 yield 一条错误项且不产生进度"
+        )
 
 
 class TestToolAuditPlugin:

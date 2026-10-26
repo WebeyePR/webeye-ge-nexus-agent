@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 
@@ -95,11 +96,11 @@ def test_execute_lark_cli_runs_safe_read_command(monkeypatch):
 
     monkeypatch.setattr(lark_tools.cli_client, "run_command", fake_run_command)
 
-    result = lark_tools.execute_lark_cli(
+    result = asyncio.run(lark_tools.execute_lark_cli(
         args_json='["docs", "+fetch", "--api-version", "v2", "--document-token", "doc123"]',
         tool_context="mock-lark-token",
         timeout_seconds=200,
-    )
+    ))
 
     assert result["status"] == "success"
     assert result["command_id"] == "docs.+fetch"
@@ -121,11 +122,11 @@ def test_execute_lark_cli_adds_dry_run_for_mutating_command(monkeypatch):
     monkeypatch.setattr(lark_tools.cli_client, "run_command", fake_run_command)
 
     # 飞书的增加记录是突变写命令
-    result = lark_tools.execute_lark_cli(
+    result = asyncio.run(lark_tools.execute_lark_cli(
         args_json='["apps", "+create", "--name", "调研问卷", "--app-type", "HTML"]',
         tool_context="mock-lark-token",
         dry_run=True,
-    )
+    ))
 
     assert result["status"] == "success"
     assert "--dry-run" in captured["args"]
@@ -135,12 +136,12 @@ def test_execute_lark_cli_blocks_mutation_when_disallowed():
     """
     测试如果未开启 data mutating 且 dry_run=False，直接拦截飞书突变命令
     """
-    result = lark_tools.execute_lark_cli(
+    result = asyncio.run(lark_tools.execute_lark_cli(
         args_json='["apps", "+create", "--name", "调研问卷", "--app-type", "HTML"]',
         tool_context="mock-lark-token",
         dry_run=False,
         allow_mutating=False,
-    )
+    ))
 
     assert result["status"] == "error"
     assert "appears to mutate data" in result["message"]
@@ -151,18 +152,18 @@ def test_execute_lark_cli_rejects_malicious_inputs():
     测试传入异常和攻击性命令参数被严密防御阻断
     """
     # 1. 绝不允许路径穿越
-    result1 = lark_tools.execute_lark_cli(
+    result1 = asyncio.run(lark_tools.execute_lark_cli(
         args_json='["docs", "+fetch", "../../../etc/passwd"]',
         tool_context="mock-lark-token",
-    )
+    ))
     assert result1["status"] == "error"
     assert "parent-directory traversal are not allowed" in result1["message"]
 
     # 2. 不支持非法服务名
-    result2 = lark_tools.execute_lark_cli(
+    result2 = asyncio.run(lark_tools.execute_lark_cli(
         args_json='["dangerous_service", "run", "something"]',
         tool_context="mock-lark-token",
-    )
+    ))
     assert result2["status"] == "error"
     assert "Unsupported Feishu/Lark service" in result2["message"]
 
@@ -180,27 +181,27 @@ def test_execute_lark_cli_flat_runs_smoothly(monkeypatch):
     monkeypatch.setattr(lark_tools.cli_client, "run_command", fake_run_command)
 
     # 1. 只读列表调用
-    result1 = lark_tools.execute_lark_cli_flat(
+    result1 = asyncio.run(lark_tools.execute_lark_cli_flat(
         service="drive",
         resource="file",
         method="list",
         params_json='{"pageSize": 10}',
         tool_context="mock-lark-token",
-    )
+    ))
     assert result1["status"] == "success"
     assert captured["args"][:3] == ["drive", "file", "list"]
     assert "--params" in captured["args"]
     assert '{"pageSize": 10}' in captured["args"]
 
     # 2. 具有干跑防护的写调用
-    result2 = lark_tools.execute_lark_cli_flat(
+    result2 = asyncio.run(lark_tools.execute_lark_cli_flat(
         service="apps",
         resource="",
         method="+create",
         json_body='\'{"name": "test"}\'',  # 附带单引号脏输入
         tool_context="mock-lark-token",
         dry_run=True,
-    )
+    ))
     assert result2["status"] == "success"
     assert captured["args"][:2] == ["apps", "+create"]
     # 验证是否成功清洗了外层的多余单引号
@@ -212,7 +213,7 @@ def test_execute_lark_cli_flat_blocks_unauthorized_mutation():
     """
     测试扁平调用在未开启 mutating 和 dry_run 时拦截突变
     """
-    result = lark_tools.execute_lark_cli_flat(
+    result = asyncio.run(lark_tools.execute_lark_cli_flat(
         service="apps",
         resource="",
         method="+create",
@@ -220,7 +221,7 @@ def test_execute_lark_cli_flat_blocks_unauthorized_mutation():
         tool_context="mock-lark-token",
         dry_run=False,
         allow_mutating=False,
-    )
+    ))
 
     assert result["status"] == "error"
     assert "appears to mutate data" in result["message"]
@@ -260,27 +261,27 @@ def test_execute_lark_cli_extreme_inputs():
     测试通用执行器拦截各种极端违规、逃逸尝试或格式错误的输入
     """
     # 1. 空 JSON array 参数
-    result_empty = lark_tools.execute_lark_cli(
+    result_empty = asyncio.run(lark_tools.execute_lark_cli(
         args_json="[]",
         tool_context="mock-token",
-    )
+    ))
     assert result_empty["status"] == "error"
     assert "args_json must be a non-empty JSON array" in result_empty["message"]
 
     # 2. 非 string 类型的注入
-    result_invalid_type = lark_tools.execute_lark_cli(
+    result_invalid_type = asyncio.run(lark_tools.execute_lark_cli(
         args_json='["docs", "+fetch", 12345]',
         tool_context="mock-token",
-    )
+    ))
     assert result_invalid_type["status"] == "error"
     assert "strings only" in result_invalid_type["message"]
 
     # 3. 超长超限参数防御
     huge_arg = "A" * 30000
-    result_too_long = lark_tools.execute_lark_cli(
+    result_too_long = asyncio.run(lark_tools.execute_lark_cli(
         args_json=f'["docs", "+fetch", "{huge_arg}"]',
         tool_context="mock-token",
-    )
+    ))
     assert result_too_long["status"] == "error"
     assert "too long" in result_too_long["message"]
 
