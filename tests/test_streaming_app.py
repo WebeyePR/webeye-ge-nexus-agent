@@ -1,9 +1,11 @@
-"""StreamingAdkApp 单元测试。
+"""StreamingAdkApp 单元测试（对齐 google-cloud-aiplatform==2.6.0 模板）。
 
 验证要点：
-1. GE 调用链路（streaming_agent_run_with_events）注入 StreamingMode.SSE；
-2. 回滚开关 AGENT_ENABLE_SSE_STREAMING=0 时退回模板默认行为（无 run_config）；
-3. 会话获取、消息透传、事件产出与模板语义一致。
+1. GE 调用链路（streaming_agent_run_with_events）恒注入 StreamingMode.SSE；
+2. 模板 2.6.0 新增逻辑完整保留：authorizations → temp: state_delta、
+   labels 透传到 RunConfig（且与 SSE 共存）；
+3. 回滚开关 AGENT_ENABLE_SSE_STREAMING=0 时委托模板默认行为（无 SSE）；
+4. 会话获取、消息透传、事件产出与模板语义一致。
 
 风格说明：与既有测试保持一致，使用 asyncio.run() 驱动协程，
 不引入 pytest-asyncio 等新依赖。
@@ -18,15 +20,16 @@ from google.adk.agents.run_config import RunConfig, StreamingMode
 from nexus_agent.deployement.streaming_app import StreamingAdkApp
 
 
-def _make_request_json(user_id="u1", session_id="s1"):
+def _make_request_json(user_id="u1", session_id="s1", extra=None):
     """构造与 GE :streamQuery 请求结构一致的 payload。"""
-    return json.dumps(
-        {
-            "userId": user_id,
-            "sessionId": session_id,
-            "message": {"role": "user", "parts": [{"text": "你好"}]},
-        }
-    )
+    payload = {
+        "userId": user_id,
+        "sessionId": session_id,
+        "message": {"role": "user", "parts": [{"text": "你好"}]},
+    }
+    if extra:
+        payload.update(extra)
+    return json.dumps(payload)
 
 
 class _FakeRunner:
@@ -64,7 +67,7 @@ def _make_app(runner, session_service):
         "app_name": "test-app",
         "runner": runner,
         "session_service": session_service,
-        "artifact_service": object(),  # 仅透传，fake convert 不真正使用
+        "artifact_service": object(),  # 仅透传；无 artifacts 时 _save_artifacts 为空操作
     }
 
     async def _fake_convert(self, **kwargs):
@@ -89,6 +92,10 @@ def test_sse_run_config_injected():
     run_config = runner.captured_kwargs["run_config"]
     assert isinstance(run_config, RunConfig)
     assert run_config.streaming_mode == StreamingMode.SSE
+    # 无 labels 时不应携带 labels（模板语义）
+    assert run_config.labels is None
+    # 无 authorizations 时 state_delta 为 None（模板语义）
+    assert runner.captured_kwargs["state_delta"] is None
     assert session_service.get_called is True
     assert runner.captured_kwargs["user_id"] == "u1"
     assert runner.captured_kwargs["session_id"] == "s1"
@@ -96,8 +103,29 @@ def test_sse_run_config_injected():
     assert len(events) == 2  # 事件逐一产出（转换后）
 
 
+def test_labels_and_authorizations_forwarded_with_sse():
+    """模板 2.6.0 新增逻辑：labels 透传进 RunConfig 且与 SSE 共存；
+    authorizations 转为 temp: state_delta（OAuth 用户态令牌）。"""
+    runner, session_service = _FakeRunner(), _FakeSessionService()
+    app = _make_app(runner, session_service)
+
+    payload = _make_request_json(
+        extra={
+            "labels": {"env": "test"},
+            "authorizations": {"auth-id-1": {"access_token": "tok-abc"}},
+        }
+    )
+    asyncio.run(_collect_all(app.streaming_agent_run_with_events(payload)))
+
+    run_config = runner.captured_kwargs["run_config"]
+    assert isinstance(run_config, RunConfig)
+    assert run_config.streaming_mode == StreamingMode.SSE
+    assert run_config.labels == {"env": "test"}
+    assert runner.captured_kwargs["state_delta"] == {"temp:auth-id-1": "tok-abc"}
+
+
 def test_kill_switch_falls_back_to_template(monkeypatch):
-    """回滚开关：AGENT_ENABLE_SSE_STREAMING=0 时不注入 run_config。"""
+    """回滚开关：AGENT_ENABLE_SSE_STREAMING=0 时委托模板默认行为（run_config 无 SSE）。"""
     monkeypatch.setenv("AGENT_ENABLE_SSE_STREAMING", "0")
     runner, session_service = _FakeRunner(), _FakeSessionService()
     app = _make_app(runner, session_service)
@@ -106,7 +134,8 @@ def test_kill_switch_falls_back_to_template(monkeypatch):
         _collect_all(app.streaming_agent_run_with_events(_make_request_json()))
     )
 
-    assert "run_config" not in runner.captured_kwargs  # 与模板默认行为一致
+    # 模板 2.6.0 默认：无 labels 时 run_config=None（即不启用 SSE）
+    assert runner.captured_kwargs["run_config"] is None
     assert len(events) == 2
 
 
@@ -117,11 +146,14 @@ def test_missing_session_raises_runtime_error():
         async def get_session(self, **kwargs):
             return None
 
+        async def create_session(self, **kwargs):
+            return None
+
     app = _make_app(_FakeRunner(), _FailingSessionService())
     try:
         asyncio.run(
-            _collect_all(app.streaming_agent_run_with_events(_make_request_json(
-                session_id="missing")))
+            _collect_all(app.streaming_agent_run_with_events(
+                _make_request_json(session_id="missing")))
         )
         raised = False
     except RuntimeError:
