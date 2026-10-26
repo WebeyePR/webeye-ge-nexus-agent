@@ -5,18 +5,20 @@ description = "WebEye Nexus Agent for Gemini Enterprise - Corporate Agent based 
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "google-adk==1.24.1",
+    # ADK 2.x 全面升级（2026-10-26，依据 docs/ADK2全面升级调研与方案.md）
+    # google-genai 约束链：adk 2.13 要求 >=2.30,<3；aiplatform 2.6 要求 <3,>=1.66 —— 取交集精确固定
+    "google-adk==2.13.0",
     # 精确锁定：云端构建必须与本地一致（官方最佳实践），且部署模板行为依赖该版本
     # 变更前请先 diff vertexai/agent_engines/templates/adk.py 与
     # nexus_agent/deployement/streaming_app.py（详见 docs/非流式与慢问题解决方案.md）
-    "google-cloud-aiplatform==1.136.0",
+    "google-cloud-aiplatform==2.6.0",
     "cloudpickle==3.1.2",
-    "requests>=2.31.0",
+    "google-genai==2.33.0",
+    "langchain_google_vertexai==3.2.5",
+    "langgraph==1.2.17",
+    "requests>=2.32.4",
     "python-dotenv>=1.2.1",
-    "Pillow>=10.0.0",
-    "langchain_google_vertexai>=3.2.2",
-    "langgraph>=1.0.7",
-    "google-genai>=1.56.0",
+    "Pillow>=10.3.0",
     "markdown>=3.5",
 ]
 
