@@ -9,6 +9,7 @@ venv/
 # Editor-specific files
 .idea/
 .vscode/
+.workbuddy
 
 # OS-specific files
 .DS_Store
@@ -41,3 +42,8 @@ node_modules/
 
 lib/
 .adk/
+# Build artifacts
+build/
+*.whl
+.deploy_env-show*
+.understand-anything/

@@ -17,7 +17,7 @@ GOOGLE_API_KEY=your-api-key                       # 本地开发使用（部署�
 - `LARK_DOMAIN` 必须是完整的 URL（包含 `https://`），不能是中文或注释
 
 #### deploy.py 配置
-检查 `lark_agent/deployement/deploy.py` 中的配置：
+检查 `lark_agent/deployment/deploy.py` 中的配置：
 ```python
 PROJECT_ID = "webeye-internal-test"        # 你的 GCP 项目 ID
 LOCATION = "us-central1"                   # 部署区域
@@ -57,7 +57,7 @@ dependencies = [
 
 ```bash
 cd /Users/apple/IdeaProjects/adk-agents
-uv build --wheel --out-dir lark_agent/deployement
+uv build --wheel --out-dir lark_agent/deployment
 ```
 
 **注意**：必须在项目根目录执行，不能在子目录中执行。
@@ -79,7 +79,7 @@ cd /Users/apple/IdeaProjects/adk-agents
 export PYTHONPATH=$(pwd)
 # 可选：如果 Agent Engine 构建较慢，可把等待超时从默认 900 秒调大
 export AGENT_ENGINE_CREATE_TIMEOUT_SECONDS=3600
-cd lark_agent/deployement
+cd lark_agent/deployment
 python3 deploy.py
 ```
 
@@ -188,7 +188,7 @@ google.api_core.exceptions.RetryError: Timeout of 120.0s exceeded
 如果代码有更新，需要重新部署：
 
 1. **更新代码**
-2. **重新构建**：`uv build --wheel --out-dir lark_agent/deployement`
+2. **重新构建**：`uv build --wheel --out-dir lark_agent/deployment`
 3. **重新部署**：执行 `bash deploy.sh`
 4. **重新注册**：执行 `scripts/register_to_GE.sh`，脚本会自动根据最新生成的部署 ID 进行注册
 5. **删除旧版本**（可选）：可以使用 `scripts/cleanup_deployed.sh`（一键清理当前项目资源）或 `scripts/batch_delete.sh`（交互式清理）

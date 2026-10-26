@@ -109,7 +109,7 @@ async def streaming_agent_run_with_events(self, request_json: str):
 - 来源（官方）：[Optimize and scale Agent Runtime performance](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/runtime/optimize-and-scale)（最后更新 2026-10-22）
 - 来源（官方，字段权威定义）：[REST Resource: projects.locations.reasoningEngines — DeploymentSpec](https://docs.cloud.google.com/vertex-ai/docs/reference/rest/v1beta1/projects.locations.reasoningEngines)（`minInstances`: "Defaults to 1. Range: [0, 10]."）
 
-**本项目现状**：`nexus_agent/deployement/deploy.py:144-158` 的 `agent_engines.create()` 调用**未设置 `min_instances`** → 承受默认冷启动惩罚。
+**本项目现状**：`nexus_agent/deployment/deploy.py:144-158` 的 `agent_engines.create()` 调用**未设置 `min_instances`** → 承受默认冷启动惩罚。
 
 ### D2. 并发模型错配（官方实测数据）
 
@@ -299,7 +299,7 @@ async def streaming_agent_run_with_events(self, request_json: str):
 | [10] | `.venv/lib/python3.14/site-packages/vertexai/agent_engines/templates/adk.py:1143-1217` —— 部署模板未传 `run_config` |
 | [11] | PyPI `google-cloud-aiplatform 2.6.0` wheel 内 `vertexai/agent_engines/templates/adk.py:1496` —— 最新版行为相同 |
 | [12] | `.venv/lib/python3.14/site-packages/google/adk/agents/run_config.py:52-70, 220` —— ADK 1.24.1 支持 StreamingMode |
-| [13] | `nexus_agent/deployement/deploy.py:115-158` —— AdkApp 封装与 `agent_engines.create()` 现有参数（无 min_instances/concurrency/resource_limits） |
+| [13] | `nexus_agent/deployment/deploy.py:115-158` —— AdkApp 封装与 `agent_engines.create()` 现有参数（无 min_instances/concurrency/resource_limits） |
 | [14] | `pyproject.toml:8` —— `google-adk==1.24.1` 已固定；`:9` `google-cloud-aiplatform>=1.135.0` 未固定 |
 
 ---

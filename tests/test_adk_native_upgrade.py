@@ -180,13 +180,17 @@ class TestResidualsEradicated:
 
     def test_stale_wheel_removed(self):
         assert not os.path.exists(
-            "nexus_agent/deployement/adk_agents-0.1.0-py3-none-any.whl"
+            "nexus_agent/deployment/adk_agents-0.1.0-py3-none-any.whl"
         ), "旧项目名 wheel 残留未根除"
+        assert not os.path.exists(
+            "nexus_agent/deployment/ge_nexus_agent-1.0.0-py3-none-any.whl"
+        ), "初版项目名 wheel 残留未根除"
+        assert not os.path.exists("build/"), "build/ 构建产物目录不得入库/残留"
 
     def test_deploy_module_has_audit_plugin(self):
         """deploy.py 的 app 构造必须携带审计插件与模型自愈重试插件。"""
 
-        src = open("nexus_agent/deployement/deploy.py").read()
+        src = open("nexus_agent/deployment/deploy.py").read()
         assert "ToolAuditPlugin()" in src
         assert "ReflectAndRetryModelPlugin()" in src, "模型瞬时故障自愈重试插件不得缺失"
         assert "from google.adk.plugins import ReflectAndRetryModelPlugin" in src

@@ -377,7 +377,6 @@ def test_discover_google_workspace_operations_rejects_flag_resource():
     result = lark_tools.discover_google_workspace_operations(
         service="drive",
         resource="files --output /tmp/out",
-        tool_context="google-token",
     )
 
     assert result["status"] == "error"

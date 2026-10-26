@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 from google.adk.agents.run_config import RunConfig, StreamingMode
 
-from nexus_agent.deployement.streaming_app import StreamingAdkApp
+from nexus_agent.deployment.streaming_app import StreamingAdkApp
 
 
 def _make_request_json(user_id="u1", session_id="s1", extra=None):

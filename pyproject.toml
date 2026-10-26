@@ -10,7 +10,7 @@ dependencies = [
     "google-adk==2.13.0",
     # 精确锁定：云端构建必须与本地一致（官方最佳实践），且部署模板行为依赖该版本
     # 变更前请先 diff vertexai/agent_engines/templates/adk.py 与
-    # nexus_agent/deployement/streaming_app.py（详见 docs/非流式与慢问题解决方案.md）
+    # nexus_agent/deployment/streaming_app.py（详见 docs/非流式与慢问题解决方案.md）
     "google-cloud-aiplatform==2.6.0",
     "cloudpickle==3.1.2",
     "google-genai==2.33.0",

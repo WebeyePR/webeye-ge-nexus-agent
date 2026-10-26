@@ -452,7 +452,6 @@ def discover_google_workspace_operations(
     service: str = "",
     intent: str = "",
     resource: str = "",
-    tool_context: ToolContext = None,
 ) -> dict:
     """
     Discover Google Workspace CLI operations from the local command registry.
@@ -462,7 +461,6 @@ def discover_google_workspace_operations(
         service: Optional gws service name, e.g. drive, sheets, gmail.
         intent: Optional intent filter such as read, write, create, or send.
         resource: Optional resource path under the service, separated by spaces, e.g. "files".
-        tool_context: Accepted for ADK compatibility; registry lookup does not require OAuth.
     """
     service_name = service.strip().lower() if service else ""
     if service_name and service_name not in GWS_ALLOWED_SERVICES:
@@ -1414,7 +1412,6 @@ def discover_lark_operations(
     service: str = "",
     intent: str = "",
     resource: str = "",
-    tool_context: ToolContext = None,
 ) -> dict:
     """
     [Discovery Tool] 从本地 Feishu/Lark CLI 注册表中模糊搜索或发现 Feishu/Lark CLI 操作技能（无网络延迟、无需凭证授权）。
@@ -1424,7 +1421,6 @@ def discover_lark_operations(
         service: 飞书模块服务名称过滤器，例如 drive, im, base, doc, contact, approval 等。
         intent: 意图过滤器（可选 'read' 只读，或 'write' 突变修改），过滤只读和写入类操作。
         resource: 被操作的飞书资源路径标识符，支持空格或点分隔（例如 "document block" 或 "base.record"）。
-        tool_context: 仅作为 ADK 工具执行器的兼容占位参数。
     """
     service_name = service.strip().lower() if service else ""
     if service_name and service_name not in LARK_ALLOWED_SERVICES:

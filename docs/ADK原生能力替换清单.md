@@ -34,7 +34,7 @@
 |------|
 | ✅ **新增**：`ToolAuditPlugin`（继承原生 `google.adk.plugins.BasePlugin`），集中审计 16 个突变类工具的调用开始/结果/异常，接入部署链路（AdkApp 原生 `plugins` 参数，存储于 `_tmpl_attrs`，Agent Engine pickle 兼容） |
 
-### nexus_agent/deployement/
+### nexus_agent/deployment/
 | 代码位置 | 决策 |
 |---------|------|
 | `deploy.py` 模块级即部署 | ✅ 上一轮已加 `main` 守卫；本轮接入审计插件 |

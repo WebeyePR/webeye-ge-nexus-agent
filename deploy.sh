@@ -27,7 +27,7 @@ if [ ! -f "$TARGET_ENV" ]; then
 fi
 
 # 设置部署目录
-DEPLOY_DIR=nexus_agent/deployement
+DEPLOY_DIR=nexus_agent/deployment
 # 设置 Python 路径
 export PYTHONPATH=$(pwd)
 
@@ -128,7 +128,7 @@ uv sync --no-editable
 echo "--- [2/4] 正在部署到 Vertex AI Reasoning Engine ---"
 # 在根目录运行部署脚本，确保模块导入 and PYTHONPATH 正确
 # --no-sync：跳过 uv 的 editable 重建（同上 EEXIST bug），直接使用上一步同步好的 venv
-uv run --no-sync python nexus_agent/deployement/deploy.py
+uv run --no-sync python nexus_agent/deployment/deploy.py
 
 # 重新加载部署生成的变量
 source scripts/load_env.sh "$ENV_SUFFIX"

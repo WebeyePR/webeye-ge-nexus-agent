@@ -16,7 +16,7 @@
 ### 3. 构建命令
 ```bash
 cd /Users/apple/IdeaProjects/adk-agents
-uv build --wheel --out-dir lark_agent/deployement
+uv build --wheel --out-dir lark_agent/deployment
 ```
 
 **注意**：
@@ -61,7 +61,7 @@ LARK_DOMAIN=https://open.feishu.cn                # ⚠️ 必须是完整URL，
 ```bash
 cd /Users/apple/IdeaProjects/adk-agents
 export PYTHONPATH=$(pwd)
-cd lark_agent/deployement
+cd lark_agent/deployment
 python3 deploy.py
 ```
 
@@ -137,7 +137,7 @@ pip install google-cloud-aiplatform==1.128.0 python-dotenv google-adk
 当代码有更新时，需要重新部署：
 
 1. **更新代码**
-2. **重新构建**：`uv build --wheel --out-dir lark_agent/deployement`
+2. **重新构建**：`uv build --wheel --out-dir lark_agent/deployment`
 3. **重新部署**：执行 `deploy.py`，获取新的 Reasoning Engine ID
 4. **自动注册**：执行 `scripts/register_to_GE.sh`，脚本会自动识别新 ID 并更新关联。
 5. **删除旧 Agent**（可选）：如果不想保留旧版本

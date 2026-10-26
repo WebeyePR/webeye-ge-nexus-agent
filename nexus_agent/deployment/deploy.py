@@ -19,7 +19,7 @@ from vertexai import agent_engines
 dotenv.load_dotenv()
 
 from nexus_agent import root_agent
-from nexus_agent.deployement.streaming_app import StreamingAdkApp
+from nexus_agent.deployment.streaming_app import StreamingAdkApp
 from nexus_agent.plugins import ToolAuditPlugin
 from google.adk.plugins import ReflectAndRetryModelPlugin
 
@@ -115,7 +115,7 @@ vertexai.init(
 polling.DEFAULT_POLLING = polling.DEFAULT_POLLING.with_timeout(CREATE_TIMEOUT_SECONDS)
 
 # 用 StreamingAdkApp 包装 Agent（在 GE 的 :streamQuery 链路上启用 SSE 流式，
-# 详见 nexus_agent/deployement/streaming_app.py 模块说明）
+# 详见 nexus_agent/deployment/streaming_app.py 模块说明）
 #
 # ADK 2.13 原生上下文缓存（App 级 ContextCacheConfig）：instruction ~5k tokens +
 # 36 工具 schema 远超 Gemini 3 的 4096 缓存门槛，跨轮复用前缀显著降本提速；
