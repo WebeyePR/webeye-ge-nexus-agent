@@ -1,6 +1,5 @@
 import os
 import sys
-import pytest
 
 # 引入项目根路径
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))

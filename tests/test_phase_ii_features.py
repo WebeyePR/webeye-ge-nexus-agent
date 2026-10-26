@@ -1,8 +1,6 @@
 import os
 import sys
-import pytest
 import asyncio
-import re
 from unittest.mock import MagicMock
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))

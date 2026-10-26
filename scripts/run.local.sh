@@ -56,19 +56,21 @@ export MODEL_NAME="${MODEL_NAME:-gemini-3.5-flash}"
 
 # 4. 非交互环境（CI/后台/管道）下先固化遥测询问，避免 ADK CLI 首次启动交互挂起
 if [ ! -t 0 ]; then
-  uv run adk telemetry disable >/dev/null 2>&1 || true
+  uv run --no-sync adk telemetry disable >/dev/null 2>&1 || true
 fi
 
 # 5. 启动
+# --no-sync：跳过 uv 的 editable 重建（uv 0.12.17 与 setuptools editable_wheel
+# 存在 EEXIST 缓存冲突 bug）；依赖一致性由 `uv sync --no-editable` 维护。
 echo "==> 模式: adk $MODE | agent: $AGENTS_DIR | model: $MODEL_NAME | port: $PORT"
 case "$MODE" in
   web)
-    exec uv run adk web "$AGENTS_DIR" --host 127.0.0.1 --port "$PORT" --log_level info
+    exec uv run --no-sync adk web "$AGENTS_DIR" --host 127.0.0.1 --port "$PORT" --log_level info
     ;;
   api)
-    exec uv run adk api_server "$AGENTS_DIR" --host 127.0.0.1 --port "$PORT" --log_level info
+    exec uv run --no-sync adk api_server "$AGENTS_DIR" --host 127.0.0.1 --port "$PORT" --log_level info
     ;;
   run)
-    exec uv run adk run "$AGENTS_DIR"
+    exec uv run --no-sync adk run "$AGENTS_DIR"
     ;;
 esac

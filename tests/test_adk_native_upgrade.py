@@ -10,13 +10,9 @@ import asyncio
 import logging
 import os
 
-import pytest
 
-from google.adk.apps import App
-from google.adk.runners import InMemoryRunner
 from google.adk.sessions import InMemorySessionService
-from google.adk.tools import FunctionTool, LongRunningFunctionTool, ToolContext
-from google.genai import types
+from google.adk.tools import LongRunningFunctionTool, ToolContext
 
 
 class TestLongRunningTaskTools:
@@ -169,7 +165,6 @@ class TestResidualsEradicated:
 
     def test_deploy_module_has_audit_plugin(self):
         """deploy.py 的 app 构造必须携带审计插件。"""
-        import re
 
         src = open("nexus_agent/deployement/deploy.py").read()
         assert "plugins=[ToolAuditPlugin()]" in src

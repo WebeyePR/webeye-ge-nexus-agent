@@ -122,10 +122,13 @@ rm -rf dist/ build/ *.egg-info
 rm -f $DEPLOY_DIR/ge_nexus_agent-1.0.0-py3-none-any.whl
 # uv build 会自动处理构建依赖
 uv build --wheel --out-dir $DEPLOY_DIR
+# 同步本地 venv（--no-editable 规避 uv 0.12.17 与 setuptools editable_wheel 的 EEXIST bug）
+uv sync --no-editable
 
 echo "--- [2/4] 正在部署到 Vertex AI Reasoning Engine ---"
 # 在根目录运行部署脚本，确保模块导入 and PYTHONPATH 正确
-uv run python nexus_agent/deployement/deploy.py
+# --no-sync：跳过 uv 的 editable 重建（同上 EEXIST bug），直接使用上一步同步好的 venv
+uv run --no-sync python nexus_agent/deployement/deploy.py
 
 # 重新加载部署生成的变量
 source scripts/load_env.sh "$ENV_SUFFIX"

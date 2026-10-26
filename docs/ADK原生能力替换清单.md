@@ -71,3 +71,19 @@
 - **部署路径**：StreamingAdkApp + ToolAuditPlugin 实例化验证通过，wheel 已重建同步
 - **净变化**：删除 2 个死函数 + main.py + 空目录 + 陈旧 wheel；新增 plugins.py 与 2 个长任务工具
 - **线上生效**：需重新部署（`bash deploy.sh`）后 GE 侧生效；本地已全验证
+
+## 四、二次防遗漏审计（2026-10-26 23:10 补充）
+
+首轮替换后进行全仓二次扫描（ruff F401/F811/F841 + 残留模式 grep + 依赖树核对），补齐以下项：
+
+| # | 发现 | 处置 | 验证 |
+|---|------|------|------|
+| 1 | `langchain_google_vertexai==3.2.5`、`langgraph==1.2.17` 为 pyproject 直接依赖，但生产代码/测试**零引用**（langgraph 仅是 ADK 可选 extra） | 从依赖移除，部署包瘦身、冷启动加速 | uv sync 后 langgraph 导入失败（已移除）、93 测试全绿、冒烟 26 partial 全绿、wheel METADATA 已精简 |
+| 2 | `cloudpickle` 无直接 import，但是 Agent Engine 序列化链路组件（aiplatform agent-engines extra 依赖） | **保留锁定**（"最稳"原则，本地/云端版本漂移风险大于瘦身收益） | — |
+| 3 | 上轮重构遗留未用导入（tests 3 文件 9 处）、`deploy.py` 未用异常变量、`__init__.py` re-export 未声明 | ruff 全量清零；`__all__` 显式导出；`lark_agent` shim 加 noqa 注明意图 | `ruff check --select F401,F811,F841` 仅剩 2 处有意 shim（已标注） |
+| 4 | **uv 0.12.17 与 setuptools editable_wheel 存在 EEXIST 缓存冲突 bug**（uv sync / uv run 触发 editable 重建即失败），会导致 deploy.sh 与本地脚本全线卡死 | `run.local.sh`/`deploy.sh` 全部 `uv run` 改为 `--no-sync`；`deploy.sh` 增加 `uv sync --no-editable` 步骤 | 冒烟脚本修复后全绿；`uv build --wheel` 正常；deploy.sh 链路确定性恢复 |
+| 5 | `agent.py`（217 行）逐行复查：无手写 generate_content_config / planner / callback 等可原生化点 | 无需改动 | — |
+| 6 | `infrastructure/`、`config/` 无手写 BaseSessionService/BaseArtifactService 等重复实现 | 无需改动 | — |
+| 7 | 全仓 `__build_response_event` / `__multimodal_parts__` / monkey-patch 模式扫描 | 零残留 | grep 确认 |
+
+**二次审计结论**：首轮清单覆盖完整，无漏审文件；本轮净效果 = 依赖精简 2 项 + 构建链路修复 + 静态检查清零。

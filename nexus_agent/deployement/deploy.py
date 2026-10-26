@@ -1,7 +1,7 @@
 import sys
 # 运行时重定向补丁，在包加载瞬间，建立 lark_agent 到 nexus_agent 的软重定向
 try:
-    import lark_agent
+    import lark_agent  # noqa: F401  有意保留：旧包名兼容 shim
 except ImportError:
     import nexus_agent
     sys.modules['lark_agent'] = nexus_agent
@@ -182,7 +182,7 @@ def _run_deploy() -> None:
                 ),
             },
         )
-    except FuturesTimeoutError as e:
+    except FuturesTimeoutError:
         print(
             "Deployment timed out while waiting for the Reasoning Engine LRO to finish. "
             "This often means the remote build is still running rather than a hard failure."
