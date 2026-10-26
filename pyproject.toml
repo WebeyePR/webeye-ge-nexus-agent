@@ -27,6 +27,14 @@ dependencies = [
     "markdown>=3.11.2",
 ]
 
+[dependency-groups]
+# 开发/测试工具链：uv sync 默认即含 dev 组；生产部署用 --no-dev 或 CI 剔除。
+# （2026-10-27 教训：deploy.sh 的 uv sync 会重建 venv，未入组的 pytest 被清除）
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.14",
+]
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"

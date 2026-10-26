@@ -131,9 +131,9 @@ class TestToolAuditPlugin:
             class FakeTool:
                 name = "delete_lark_document"
 
-            r1 = await p.before_tool_callback(tool=FakeTool(), args={"doc_token": "x"}, tool_context=ctx)
-            r2 = await p.after_tool_callback(tool=FakeTool(), args={}, tool_context=ctx, result={"status": "success"})
-            r3 = await p.on_tool_error_callback(tool=FakeTool(), args={}, tool_context=ctx, error=RuntimeError("boom"))
+            r1 = await p.before_tool_callback(tool=FakeTool(), tool_args={"doc_token": "x"}, tool_context=ctx)
+            r2 = await p.after_tool_callback(tool=FakeTool(), tool_args={}, tool_context=ctx, result={"status": "success"})
+            r3 = await p.on_tool_error_callback(tool=FakeTool(), tool_args={}, tool_context=ctx, error=RuntimeError("boom"))
             return r1, r2, r3
 
         r1, r2, r3 = asyncio.run(scenario())
@@ -159,7 +159,7 @@ class TestToolAuditPlugin:
             class FakeTool:
                 name = "delete_lark_document"
 
-            await p.before_tool_callback(tool=FakeTool(), args={"doc_token": "x"}, tool_context=ctx)
+            await p.before_tool_callback(tool=FakeTool(), tool_args={"doc_token": "x"}, tool_context=ctx)
 
         with caplog.at_level(logging.INFO, logger="nexus_agent.plugins"):
             asyncio.run(scenario(caplog))
@@ -220,3 +220,47 @@ class TestResidualsEradicated:
 
         sig = inspect.signature(ReflectAndRetryModelPlugin.__init__)
         assert sig.parameters["max_retries"].default == 3
+
+
+# ---------------------------------------------------------------------------
+# 插件回调签名契约测试（2026-10-27 远程实测发现的 bug 回归锚定）
+# ADK 2.13 回调契约: 关键字为 tool_args；签名写成 args 会导致远程运行时
+# 工具调用全部被拦截（ToolAuditPlugin.before_tool_callback() got an
+# unexpected keyword argument 'tool_args'）
+# ---------------------------------------------------------------------------
+
+class TestPluginCallbackSignatureContract:
+    """ToolAuditPlugin 必须兼容 ADK 2.13 回调契约（tool_args 关键字）。"""
+
+    def _make_plugin(self):
+        from nexus_agent.plugins import ToolAuditPlugin
+
+        return ToolAuditPlugin()
+
+    def test_callbacks_accept_adk213_tool_args_kwarg(self):
+        import asyncio
+
+        from nexus_agent.plugins import ToolAuditPlugin
+
+        plugin = self._make_plugin()
+        tool = type("T", (), {"name": "create_lark_document"})()
+        common = dict(tool=tool, tool_args={"title": "t"}, tool_context=None)
+        # 三个回调都必须以 tool_args 关键字调用成功且返回 None
+        assert asyncio.run(plugin.before_tool_callback(**common)) is None
+        assert asyncio.run(plugin.after_tool_callback(**common, result={"status": "success"})) is None
+        assert asyncio.run(plugin.on_tool_error_callback(**common, error=RuntimeError("x"))) is None
+
+    def test_plugin_manager_invocation_path_compatible(self):
+        """经 ADK PluginManager 自身调用路径验证签名兼容（远程同款调用方式）。"""
+        import asyncio
+
+        from google.adk.plugins.plugin_manager import PluginManager
+        from nexus_agent.plugins import ToolAuditPlugin
+
+        pm = PluginManager(plugins=[ToolAuditPlugin()])
+        tool = type("T", (), {"name": "execute_lark_cli"})()
+        # PluginManager 以 tool_args= 关键字调用——签名不匹配会在此抛 TypeError
+        result = asyncio.run(
+            pm.run_before_tool_callback(tool=tool, tool_args={"cmd": "docs"}, tool_context=None)
+        )
+        assert result is None

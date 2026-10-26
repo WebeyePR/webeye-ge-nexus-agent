@@ -54,8 +54,10 @@ class ToolAuditPlugin(BasePlugin):
     def __init__(self, name: str = "tool_audit_plugin"):
         super().__init__(name=name)
 
+    # 回调签名遵循 ADK 2.13 契约：关键字为 tool_args（非 args）——
+    # 签名不匹配会导致远程运行时工具调用全部被拦截（2026-10-27 远程实测发现）
     async def before_tool_callback(
-        self, *, tool: BaseTool, args: dict, tool_context: ToolContext
+        self, *, tool: BaseTool, tool_args: dict, tool_context: ToolContext
     ):
         """工具执行前记录审计事件。必须返回 None 以不干预执行。"""
         name = getattr(tool, "name", tool.__class__.__name__)
@@ -64,7 +66,7 @@ class ToolAuditPlugin(BasePlugin):
                 "[AUDIT] tool_call_start "
                 f"tool={name} user={getattr(tool_context, 'user_id', '?')} "
                 f"session={getattr(tool_context, 'session_id', '?')} "
-                f"args={_args_summary(args or {})}"
+                f"args={_args_summary(tool_args or {})}"
             )
         return None
 
@@ -72,7 +74,7 @@ class ToolAuditPlugin(BasePlugin):
         self,
         *,
         tool: BaseTool,
-        args: dict,
+        tool_args: dict,
         tool_context: ToolContext,
         result: dict,
     ):
@@ -90,7 +92,7 @@ class ToolAuditPlugin(BasePlugin):
         self,
         *,
         tool: BaseTool,
-        args: dict,
+        tool_args: dict,
         tool_context: ToolContext,
         error: Exception,
     ):
