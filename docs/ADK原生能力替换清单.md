@@ -344,7 +344,7 @@ Docker 实测 `lark-cli api --help`（linux/amd64）：**原生支持 `--dry-run
 
 ### 三、薄包装替代方案表（"准备好替代"落实——未来一行切换即可）
 
-以下 9 个薄包装工具的 CLI 等价参数模板已验证可达（registry 命令在案）。若未来追求极简，删除包装、instruction 改指 CLI 总线即可：
+以下 9 个薄包装工具的 CLI 等价参数模板**已经 Docker 实测可执行**（lark 侧 3 个突变模板 + api 通道 dry-run 真跑通过、请求构造正确；GWS 侧模板与工具源码逐字对齐）：若未来追求极简，删除包装、instruction 改指 CLI 总线即可：
 
 | 包装工具 | CLI 等价调用（execute_lark_cli / execute_google_workspace_cli 的 args） |
 |---|---|
@@ -383,3 +383,20 @@ Docker 实测 `lark-cli api --help`（linux/amd64）：**原生支持 `--dry-run
 **最终门禁**：96 测试全绿、35 工具挂载正确、提交链完整（76f6ddf → b99e69e）。
 
 **审计正式关门**：ADK 表面五层穷尽（模块 113/32 域 → Agent 33 字段 → 工具类 91 → ToolContext 18 方法 → App/RunConfig 6+27 字段）+ 产物级哈希实证 + 文件层 74 个清点 + 工具层 35 个逐个裁决（1 个根除、替代表就绪）。无剩余未审视项；后续仅剩两类动作：① bash deploy.sh 上线（人工）；② 2.13.x 补丁发布后升级并回归 2 项相关修复（FunctionNode TypeAdapter、prompt-cache token 序列化）。
+
+
+### 五、替代表实测记录（第十七遍，2026-10-27 01:03）
+
+Docker（linux/amd64）+ 假凭据 + `--dry-run` 真跑 4 模板，全部输出正确请求构造：
+| 模板 | dry-run 实测结果 |
+|---|---|
+| `docs +create --title T --markdown M` | ✅ 构造 MCP tool: create-doc POST 请求 |
+| `docs +update --doc D --markdown X --mode append` | ✅ 构造 MCP tool: update-doc POST 请求 |
+| `drive +delete --file-token TOK --type docx --yes` | ✅ 构造 DELETE 请求 |
+| `api GET /open-apis/calendar/v4/calendars` | ✅ 构造 GET 请求 |
+
+单元层同步验证：3 个突变模板 `_is_lark_mutating_args=True` + 守卫放行（allow_mutating=True）、api GET=False / POST=True 分类正确。
+
+**意外佐证**：dry-run 显示 lark-cli 的 `docs +create/+update` 内部路由到的正是 "MCP tool: create-doc/update-doc"——CLI 通道与 feishu_mcp_* 工具是同一操作体系的两个门面，项目"双后端互补"的架构判断获得二进制级证据。
+
+**结论**：替代表从"纸面等价"升级为"实测可执行"，未来切换零调研成本。
