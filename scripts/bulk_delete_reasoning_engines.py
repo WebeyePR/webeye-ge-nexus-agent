@@ -118,12 +118,12 @@ def load_env_file(path: Path) -> None:
 def load_project_env() -> None:
     base_env = os.getenv("BASE_ENV_FILE")
     deploy_env = os.getenv("DEPLOY_ENV_FILE")
-    
+
     if base_env:
         load_env_file(Path(base_env))
     else:
         load_env_file(ROOT_DIR / ".env")
-        
+
     if deploy_env:
         load_env_file(Path(deploy_env))
     else:

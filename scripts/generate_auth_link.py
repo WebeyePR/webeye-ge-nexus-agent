@@ -43,7 +43,7 @@ def generate_lark_auth_url():
         print(f"Error: {scopes_file} not found.")
         return
 
-    with open(scopes_file, 'r') as f:
+    with open(scopes_file) as f:
         try:
             scopes_data = json.load(f)
         except json.JSONDecodeError:
@@ -62,7 +62,7 @@ def generate_lark_auth_url():
     # 3. 获取关键配置参数
     client_id = os.getenv("LARK_CLIENT_ID")
     redirect_uri = os.getenv("LARK_REDIRECT_URI")
-    
+
     # 如果没有显式的 LARK_CLIENT_ID，尝试从现有的 LARK_AUTHORIZATION_URI 中解析
     existing_uri = os.getenv("LARK_AUTHORIZATION_URI")
     if not client_id and existing_uri:
@@ -84,7 +84,7 @@ def generate_lark_auth_url():
         "response_type": "code",
         "scope": " ".join(all_scopes) # 注意：urlencode 会处理空格转义
     }
-    
+
     if redirect_uri:
         params["redirect_uri"] = redirect_uri
 

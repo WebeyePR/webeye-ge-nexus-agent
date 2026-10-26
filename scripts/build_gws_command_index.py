@@ -4,7 +4,8 @@ import json
 import re
 import shlex
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any
+from collections.abc import Iterable
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,7 +49,7 @@ def _extract_frontmatter_value(text: str, key: str) -> str:
     return match.group(1).strip() if match else ""
 
 
-def _iter_bash_commands(text: str) -> Iterable[List[str]]:
+def _iter_bash_commands(text: str) -> Iterable[list[str]]:
     for block in re.findall(r"```(?:bash|sh)?\n(.*?)```", text, flags=re.DOTALL):
         for raw_line in block.splitlines():
             line = raw_line.strip()
@@ -62,7 +63,7 @@ def _iter_bash_commands(text: str) -> Iterable[List[str]]:
                 continue
 
 
-def _command_prefix(argv: List[str]) -> List[str]:
+def _command_prefix(argv: list[str]) -> list[str]:
     prefix = []
     for token in argv[1:]:
         if token.startswith("-") or token.startswith("<") or token.startswith("["):
@@ -71,7 +72,7 @@ def _command_prefix(argv: List[str]) -> List[str]:
     return prefix
 
 
-def _command_id(prefix: List[str]) -> str:
+def _command_id(prefix: list[str]) -> str:
     if len(prefix) >= 2 and prefix[1].startswith("+"):
         return ".".join(prefix[:2])
     return ".".join(prefix)
@@ -85,7 +86,7 @@ def _is_mutating(command_id: str, skill_text: str) -> bool:
     return "[!caution]" in lowered or "write command" in lowered
 
 
-def _build_entry(command_id: str, prefix: List[str], argv: List[str], text: str) -> Dict[str, Any]:
+def _build_entry(command_id: str, prefix: list[str], argv: list[str], text: str) -> dict[str, Any]:
     description = _extract_frontmatter_value(text, "description") or command_id
     kind = "write" if _is_mutating(command_id, text) else "read"
     service = prefix[0]
@@ -102,8 +103,8 @@ def _build_entry(command_id: str, prefix: List[str], argv: List[str], text: str)
     }
 
 
-def discover_from_skills(skills_dir: Path) -> Dict[str, Dict[str, Any]]:
-    commands: Dict[str, Dict[str, Any]] = {}
+def discover_from_skills(skills_dir: Path) -> dict[str, dict[str, Any]]:
+    commands: dict[str, dict[str, Any]] = {}
     for skill_path in sorted(skills_dir.glob("*/SKILL.md")):
         text = skill_path.read_text(encoding="utf-8")
         for argv in _iter_bash_commands(text):
@@ -117,7 +118,7 @@ def discover_from_skills(skills_dir: Path) -> Dict[str, Dict[str, Any]]:
     return commands
 
 
-def load_existing(path: Path) -> Dict[str, Dict[str, Any]]:
+def load_existing(path: Path) -> dict[str, dict[str, Any]]:
     if not path.exists():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))

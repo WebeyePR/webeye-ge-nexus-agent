@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Lark CLI Command Index Builder
 ------------------------------
@@ -17,7 +16,8 @@ import logging
 import re
 import shlex
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Set
+from typing import Any
+from collections.abc import Iterable
 
 # 配置日志
 logging.basicConfig(
@@ -32,7 +32,7 @@ DEFAULT_SKILLS_DIR = ROOT / "lib" / "lark-cli-v1.0.98" / "skills"
 DEFAULT_OUTPUT = ROOT / "nexus_agent" / "lark_registry" / "commands.json"
 
 # 默认的变动型（写/修改）命令及快捷方法词表，用于安全审计识别
-MUTATING_VERBS: Set[str] = {
+MUTATING_VERBS: set[str] = {
     "create",
     "delete",
     "update",
@@ -66,7 +66,7 @@ class BaseCommandExtractor:
         self.platform_name = platform_name
         self.cli_name = cli_name
 
-    def extract_from_markdown(self, text: str, file_path: Path) -> Dict[str, Dict[str, Any]]:
+    def extract_from_markdown(self, text: str, file_path: Path) -> dict[str, dict[str, Any]]:
         """从 Markdown 文本中提取结构化命令字典。子类须重构此方法。"""
         raise NotImplementedError
 
@@ -98,7 +98,7 @@ class LarkCommandExtractor(BaseCommandExtractor):
             line = assign_match.group(1)
         return line.strip()
 
-    def _iter_markdown_commands(self, text: str) -> Iterable[List[str]]:
+    def _iter_markdown_commands(self, text: str) -> Iterable[list[str]]:
         """
         解析并迭代表达式，同时支持：
         1. ```bash ... ``` 代码块中的命令
@@ -130,7 +130,7 @@ class LarkCommandExtractor(BaseCommandExtractor):
             except ValueError:
                 continue
 
-    def _get_command_prefix(self, argv: List[str]) -> List[str]:
+    def _get_command_prefix(self, argv: list[str]) -> list[str]:
         """
         提取服务名和路径前缀，例如 ["lark-cli", "calendar", "events", "create"] -> ["calendar", "events"]
         跳过以横杠开头的 flag 和可能包含占位符的参数
@@ -142,7 +142,7 @@ class LarkCommandExtractor(BaseCommandExtractor):
             prefix.append(token)
         return prefix
 
-    def _determine_command_id(self, prefix: List[str]) -> str:
+    def _determine_command_id(self, prefix: list[str]) -> str:
         """
         拼装唯一的 command_id。
         如果是快捷命令（以 + 开头），拼装为 service.+verb，例如 "calendar.+agenda"
@@ -160,7 +160,7 @@ class LarkCommandExtractor(BaseCommandExtractor):
         last_word = parts[-1].lstrip("+").lower() if parts else ""
         if last_word in MUTATING_VERBS:
             return True
-        
+
         # 针对通用 api 调用（如 lark-cli api POST ...）进行判定
         if "api.post" in command_id or "api.put" in command_id or "api.delete" in command_id or "api.patch" in command_id:
             return True
@@ -172,8 +172,8 @@ class LarkCommandExtractor(BaseCommandExtractor):
 
         return False
 
-    def extract_from_markdown(self, text: str, file_path: Path) -> Dict[str, Dict[str, Any]]:
-        commands: Dict[str, Dict[str, Any]] = {}
+    def extract_from_markdown(self, text: str, file_path: Path) -> dict[str, dict[str, Any]]:
+        commands: dict[str, dict[str, Any]] = {}
         file_desc = self._extract_frontmatter_desc(text)
 
         for argv in self._iter_markdown_commands(text):
@@ -226,7 +226,7 @@ def compile_registry(skills_dir: Path, output_file: Path, replace: bool = False)
     """
     logger.info("Initializing Lark CLI Command Registry compiling workflow...")
     extractor = LarkCommandExtractor()
-    all_compiled: Dict[str, Dict[str, Any]] = {}
+    all_compiled: dict[str, dict[str, Any]] = {}
 
     # 1. 递归扫描 skillsDir 下的所有 Markdown 文件
     md_files = sorted(skills_dir.rglob("*.md"))
