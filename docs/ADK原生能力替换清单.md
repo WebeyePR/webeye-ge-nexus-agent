@@ -259,3 +259,114 @@
 - Workflow/sub_agents/工具集类：项目形态不变，维持原判
 
 **验证**：96 测试全绿、冒烟 30 partial + 24 工具调用全过。
+
+## 十五、第十三遍审计（2026-10-27 00:40 补充）——ToolContext 表面 × 目录结构专项
+
+最后两层未覆盖面：**ToolContext 运行时能力面**（18 个公开方法）与**目录结构本身**。
+
+**ToolContext 18 方法裁决**：
+| 方法 | 裁决 |
+|---|---|
+| save_artifact / load_artifact（族） | ✅ 已原生在用（文档图片产物 3 处 + render_image_as_artifact） |
+| request_confirmation | ✅ 间接在用（第十二遍 require_confirmation 硬确认即走此通道） |
+| 凭证族（get/request/save/load_credential、get_auth_response） | ❌ GE OAuth2 注入体系已在位，重接高风险零收益 |
+| 记忆族（add/search/delete_memory 等） | ❌ 无记忆服务诉求（与 memory 域裁决一致） |
+| list_artifacts / get_artifact_version | ❌ 按需写入型使用，无需清单能力 |
+| run_node / get_invocation_context | 框架内部接口，非应用层 |
+| **render_ui_widget**（UI 组件渲染，MCP App iframe 等） | ⏸ 列入 F5 同批观察项：能力真实存在但需 GE 前端支持，与确认事件流同属"前端兼容性待验证" |
+
+**冗余签名根除**：AST 扫描 37 个带 tool_context 参数的工具，`discover_lark_operations` / `discover_google_workspace_operations` 两处声明未使用（纯兼容占位）→ 已删除参数与 docstring 行，同步修正测试。
+
+**目录结构修正（"重构、目录结构也在所不惜"兑现）**：
+- `nexus_agent/deployement/` → `nexus_agent/deployment/`（长期拼写错误正名），git 全量识别为 rename（历史可追溯）；deploy.sh / tests / pyproject 注释 / 6 份文档共 10+ 处引用同步更新，全仓复扫零残留
+- 清除磁盘陈旧产物：`ge_nexus_agent-1.0.0` 旧 wheel、`build/` 目录（均未入库）；根 .gitignore 补 `build/`、`*.whl`、本地环境文件防护
+- 删除被根 .gitignore 完全覆盖的内层 `.gitignore`
+
+**验证**：96 测试全绿、端到端冒烟全过（12 partial + 8 工具调用，模型真实调用了刚重构的 discover_lark_operations 行为正常）。
+
+**事故记录与纠正**：本轮曾误用 `git add -A` 把工作区既存未跟踪文件（含 `.deploy_env-show*` 环境信息文件）卷入提交——立即 `reset --soft` 撤销、检查确认无密钥明文后改用精确路径重新提交；根 .gitignore 已补 `.deploy_env-show*`、`.understand-anything/` 防复发。遗留：README.md 有此前会话的实质改动未提交（非本轮范围，留待用户处置）。
+
+## 十六、第十四遍审计（2026-10-27 00:50 补充）——全文件清点 × 逐工具 CLI 覆盖度裁决
+
+按用户两个新注执行：① 扫描项目全部文件逐一判决；② 35 个注册工具逐个对照 CLI 总线（lark 308 条 / gws 33 条注册表）覆盖度。
+
+### 一、全文件清点（74 个入库文件，逐类判决）
+
+| 类别 | 文件 | 判决 |
+|---|---|---|
+| 核心包 | __init__/agent/tools/plugins + config/ + infrastructure/ + lark_registry/ + gws_registry/ + deployment/ | ✅ 全部有真实引用（历遍 AST+grep 双重验证），零死文件 |
+| 二进制 | bin/lark-cli、bin/gws | ✅ 必需（CLI 总线本体，linux/amd64，Docker 实测过） |
+| 脚本 | scripts/ 22 个 | ✅ 逐一核过：构建/部署/清理/授权/本地运行各有用途，无孤儿（batch_delete.sh 等运维脚本保留） |
+| 测试 | tests/ 11 个 | ✅ 全部有效、引用完整 |
+| 文档 | docs/ 8 个入库 + llms-full.txt + README | ✅ 活文档在案 |
+| 磁盘未入库残留 | README.md 未提交改动（此前会话）、.deploy_env-show*、.understand-anything/、~15 份未跟踪文档 | ⚠️ 留待用户处置（.gitignore 已防护，不会误入库） |
+
+### 二、逐工具 CLI 覆盖度裁决（35 工具全表）
+
+**❌ 冗余 → 已删除（1 个，commit 6c7e30f）**：
+- `execute_lark_api`：CLI `api` 通道的直通包装，与 `execute_lark_cli(args=["api", METHOD, path, ...])` 完全等价且**更弱**（无注册表校验、无干跑门控——正是第十二遍记录的安全边界）。删除后该边界随之根除。关键修正：`_validate_lark_args` 曾把 `/open-apis/...` API 路径误判为文件系统绝对路径而拒绝（这才是 execute_lark_api 存在的真正原因）——已修正为仅拦文件路径（`..` 独立拦截保留）；few-shot 示例迁移至 execute_lark_cli docstring；36→35 工具
+
+**✅ 薄包装但判定保留（8 个）**——CLI 单命令可达，但包装承担三步法之外的固定语义/校验/默认值，模型直调 CLI 需自行拼装且易错：
+- search_google_drive_files（query 构造+literal 转义）、append_google_doc_text、read_google_sheet_range、append_google_sheet_rows（行归一化）、list_google_calendar_events（days 上限钳制）、create_google_calendar_event（强校验+attendees/meet 组装）、create_lark_document、update_lark_document、delete_lark_document（type map+--yes+恒确认）——均一条 CLI 命令即等价，**保留理由：参数安全规范化属包装价值，且 instruction 已定义各自定位**；若未来追求极简可并入 CLI 总线（备好替代：全部参数语义已可在 execute_*_cli args 表达）
+
+**✅ 增值管线 → 必须保留（8 个）**——CLI 原生不具备的能力：
+- create_google_doc_with_text（markdown→HTML 高保真 + 私图隔离卡 + fallback 编译器）
+- create_google_sheet_with_rows（create+append 两步编排 + ID 提取 + 部分失败恢复信息）
+- query_lark_documents（搜索 + 高亮清理 + 前 5 文档内容预览增强 + markdown 卡片）
+- get_lark_document_markdown / rich_content（blocks→markdown 保真转换 + 图片下载→save_artifact 注册 + 链接替换）
+- get_lark_document_content_pdf / docx（drive export 异步任务轮询 + 下载）
+- render_image_as_artifact（下载→artifact 注册→Part 返回）
+- save_ai_output_to_feishu_doc ×2（markdown→HTML 管线写入飞书）
+
+**✅ 独立后端 → 保留（5 个）**：feishu_mcp_create/update/fetch_doc + wait_for_*_task ×2（MCP 异步任务 + LRFT，与 CLI 同步通道互补回退，instruction 已定义分工）
+
+**✅ 总线本体（10 个）**：discover/spec/schema/execute ×2 平台 + get_access_token（授权诊断）+ 4 个 CLI 执行器
+
+**✅ 基础（1 个）**：get_access_token
+
+### 三、验证
+96 测试全绿（api 通道等价性测试 + 干跑门控断言 + JSON 校验语义保持）、端到端冒烟全过（37 partial + 32 工具调用）。提交链至 6c7e30f。
+
+## 十七、第十五遍审计（2026-10-27 00:56 补充）——配置类表面收官 × 替代方案落地 × 未发布提交核对
+
+### 一、App / RunConfig 全字段枚举（配置类表面正式收官）
+
+**App 全部 6 字段**：name/root_agent/plugins（在用）+ 三个 config（第八遍已裁决：context_cache 已采、compaction/resumability 不采）——**表面穷尽**。
+
+**RunConfig 全部 27 字段**裁决（Agent Engine 托管链路由引擎内部构造 RunConfig，部署方无法注入，绝大多数不适用）：
+- `tool_thread_pool_config`：**重大定性发现**——ADK 2.13 存在可选机制让同步 FunctionTool 跑工具线程池（_caller.py 源码明言），但默认 None=事件循环直跑，且 Agent Engine 无法注入 RunConfig。**证实第三遍根因判断正确：async 化 26 工具是唯一可行路径**（线程池方案在托管环境不可达）
+- max_llm_calls/labels/custom_metadata/context_window_compression 等：托管环境不可注入或已有 App 级等价裁决，均不采
+- 其余 20+ 为 Live 语音/实时/转写类：不适用
+
+### 二、`execute_lark_api` 删除风险闭环（第十四遍遗留）
+
+Docker 实测 `lark-cli api --help`（linux/amd64）：**原生支持 `--dry-run`**、`--params/--data/--file` 完整对齐，另有 `--page-all/--jq/--format` 增强能力。api 通道经 `execute_lark_cli` 总线完全成立，干跑门控生效——第十四遍的运行时风险正式关闭。
+
+### 三、薄包装替代方案表（"准备好替代"落实——未来一行切换即可）
+
+以下 9 个薄包装工具的 CLI 等价参数模板已验证可达（registry 命令在案）。若未来追求极简，删除包装、instruction 改指 CLI 总线即可：
+
+| 包装工具 | CLI 等价调用（execute_lark_cli / execute_google_workspace_cli 的 args） |
+|---|---|
+| create_lark_document | `["docs","+create","--title",T,"--markdown",M,"--folder-token",F]`（allow_mutating=True） |
+| update_lark_document | `["docs","+update","--doc",D,"--markdown",M,"--mode",mode]`（allow_mutating=True） |
+| delete_lark_document | `["drive","+delete","--file-token",T,"--type",ty,"--yes"]`（allow_mutating=True；硬确认仍由包装判定保证） |
+| search_google_drive_files | `["drive","files","list","--params","{\"q\":\"name contains 'Q' and trashed = false\",\"pageSize\":N}","--fields","files(id,name,mimeType,webViewLink,modifiedTime),nextPageToken"]` |
+| append_google_doc_text | `["docs","+write","--document",ID,"--text",T]` |
+| read_google_sheet_range | `["sheets","+read","--spreadsheet",ID,"--range",R]` |
+| append_google_sheet_rows | `["sheets","+append","--spreadsheet",ID,"--json-values",J]` |
+| list_google_calendar_events | `["calendar","+agenda","--days",N,"--format","json"]` |
+| create_google_calendar_event | `["calendar","+insert","--calendar",C,"--summary",S,"--start",A,"--end",E,...]` |
+| create_google_sheet_with_rows | CLI 需两次串行调用（spreadsheets.create → +append），包装的两步编排+部分失败恢复不可平替，**长期保留** |
+
+### 四、GitHub main 未发布提交核对（2.13.0 之后，Oct 22-25）
+
+| 提交 | 对本项目 | 处置 |
+|---|---|---|
+| fix: harden callable type hint resolution and FunctionNode TypeAdapter handling | **相关**——LRFT 走 FunctionNode 语义 | ⏳ 待 2.13.x 发布后升级验证 |
+| feat: serialize prompt-cache creation tokens on LlmResponse | **相关**——已接入 ContextCacheConfig | ⏳ 同上 |
+| fix: require authlib ≥1.9.1（CVE） | 本机 uv.lock 已锁 1.9.1 | ✅ 已达标 |
+| fix(cli): /run_sse 监听客户端断连 | 仅本地测试服务受益 | 无动作 |
+| 其余（MongoDB memory/A2A/workflow/eval/session rewind 等） | 场景无关 | 无动作 |
+
+**结论**：无立即升级需求（PyPI 最新仍 2.13.0）；两项相关修复随下个补丁版本升级时回归验证。
