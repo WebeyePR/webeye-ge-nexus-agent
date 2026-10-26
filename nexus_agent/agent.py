@@ -192,7 +192,10 @@ def _confirm_real_mutation(**kwargs) -> bool:
 _ENABLE_TOOL_CONFIRMATION = os.getenv("AGENT_ENABLE_TOOL_CONFIRMATION", "1") == "1"
 
 root_agent = Agent(
-    model=os.getenv("MODEL_NAME", "gemini-3-flash-preview"),
+    # gemini-3.8-flash：2026-09 稳定版，官方定位"为长程编码与自主智能体打造的
+    # 最智能主力模型"，与本项目企业工具代理场景精确匹配（本项目 2026-10-27
+    # 真实调用核验可用；旧默认 gemini-3-flash-preview 为 2025-12 preview 模型）。
+    model=os.getenv("MODEL_NAME", "gemini-3.8-flash"),
     name="webeye_nexus_agent",
     description="WebEye Nexus Agent for Gemini Enterprise: an ADK-based enterprise agent for Feishu/Lark and Google Workspace operations.",
     # ADK 2.13 原生：指令为纯静态文本（无状态占位符），置于 static_instruction
