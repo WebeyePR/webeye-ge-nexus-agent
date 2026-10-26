@@ -120,86 +120,93 @@ app = StreamingAdkApp(
     app_name="webeye-nexus-agent-app",
 )
 
-# 打印文件大小供调试
-if os.path.exists(AGENT_WHL_FILE):
-    size_mb = os.path.getsize(AGENT_WHL_FILE) / (1024 * 1024)
-    print(f"Preparing to upload {AGENT_WHL_FILE} ({size_mb:.2f} MB)...")
-else:
-    print(f"Error: {AGENT_WHL_FILE} not found!")
-    exit(1)
+def _run_deploy() -> None:
+    """执行真实部署。仅在本模块作为脚本运行时触发（防 import 副作用误部署）。"""
 
-print(
-    f"Starting Agent Engine deploy with polling timeout {int(CREATE_TIMEOUT_SECONDS)} seconds..."
-)
+    # 打印文件大小供调试
+    if os.path.exists(AGENT_WHL_FILE):
+        size_mb = os.path.getsize(AGENT_WHL_FILE) / (1024 * 1024)
+        print(f"Preparing to upload {AGENT_WHL_FILE} ({size_mb:.2f} MB)...")
+    else:
+        print(f"Error: {AGENT_WHL_FILE} not found!")
+        sys.exit(1)
 
-try:
-    # 强制重新加载环境变量，确保 deploy.sh 加载的变量生效
-    dotenv.load_dotenv(override=True)
-
-    # Install the project wheel remotely. Its METADATA is generated from
-    # pyproject.toml, so runtime dependencies still have a single source of
-    # truth while the lark_agent package itself is installed before unpickling.
-    os.chdir(CURRENT_DIR)
-    requirements_source = [AGENT_WHL_FILE_NAME] + load_project_requirements(PYPROJECT_FILE)
-    print(f"Deploying using pyproject.toml requirements: {requirements_source}")
-
-    # 部署规格参数（治"慢"：消除冷启动排队与并发错配，官方 Optimize and scale 建议）
-    # min_instances：保持实例温热，避免冷启动（官方实测 ~4.7s vs 温启动 0.4s，上限 10）
-    min_instances = int(os.getenv("AGENT_MIN_INSTANCES", "1"))
-    # container_concurrency：ADK 异步 Agent 官方建议设为 9 的倍数（如 36），
-    # 高并发下最大延迟可从 ~60s 降至 ~7s；内存不足时调低并同时调小并发
-    container_concurrency = int(os.getenv("AGENT_CONTAINER_CONCURRENCY", "36"))
-    # resource_limits：默认高于官方缺省（cpu=4/mem=4Gi），为 36 并发预留余量防 OOM
-    resource_limits = {
-        "cpu": os.getenv("AGENT_CPU", "4"),
-        "memory": os.getenv("AGENT_MEMORY", "8Gi"),
-    }
     print(
-        f"Deployment spec: min_instances={min_instances}, "
-        f"container_concurrency={container_concurrency}, resource_limits={resource_limits}"
+        f"Starting Agent Engine deploy with polling timeout {int(CREATE_TIMEOUT_SECONDS)} seconds..."
     )
 
-    remote_app = agent_engines.create(
-        agent_engine=app,
-        requirements=requirements_source,
-        extra_packages=[AGENT_WHL_FILE_NAME],
-        display_name=os.getenv("AGENT_DISPLAY_NAME", "WebEye Nexus Agent"),
-        min_instances=min_instances,
-        container_concurrency=container_concurrency,
-        resource_limits=resource_limits,
-        env_vars={
-            "LARK_AUTH_ID": os.getenv("LARK_AUTH_ID"),
-            "LARK_DOMAIN": os.getenv("LARK_DOMAIN"),
-            "LARK_CLIENT_ID": os.getenv("LARK_CLIENT_ID"),
-            "GOOGLE_WORKSPACE_AUTH_ID": os.getenv("GOOGLE_WORKSPACE_AUTH_ID"),
-            "GOOGLE_WORKSPACE_PROJECT_ID": os.getenv(
-                "GOOGLE_WORKSPACE_PROJECT_ID", os.getenv("PROJECT_ID")
-            ),
-        },
-    )
-except FuturesTimeoutError as e:
-    print(
-        "Deployment timed out while waiting for the Reasoning Engine LRO to finish. "
-        "This often means the remote build is still running rather than a hard failure."
-    )
-    print(
-        "Recommended actions: check Cloud Logging / Vertex AI Agent Engine console, "
-        "then rerun with a larger AGENT_ENGINE_CREATE_TIMEOUT_SECONDS if needed."
-    )
-    raise
+    try:
+        # 强制重新加载环境变量，确保 deploy.sh 加载的变量生效
+        dotenv.load_dotenv(override=True)
 
-print("Deployment finished!")
-print(f"Resource Name: {remote_app.resource_name}")
+        # Install the project wheel remotely. Its METADATA is generated from
+        # pyproject.toml, so runtime dependencies still have a single source of
+        # truth while the lark_agent package itself is installed before unpickling.
+        os.chdir(CURRENT_DIR)
+        requirements_source = [AGENT_WHL_FILE_NAME] + load_project_requirements(PYPROJECT_FILE)
+        print(f"Deploying using pyproject.toml requirements: {requirements_source}")
 
-# 自动回写到独立的 .deploy_env 文件
-# 不再修改手动维护的 .env 文件
-try:
-    dotenv.set_key(
-        DEPLOY_ENV_FILE,
-        "VERTEX_REASONING_ENGINE_NAME",
-        remote_app.resource_name,
-        quote_mode="always",
-    )
-    print(f"Successfully updated VERTEX_REASONING_ENGINE_NAME in {DEPLOY_ENV_FILE}")
-except Exception as e:
-    print(f"Warning: Failed to update {DEPLOY_ENV_FILE}: {e}")
+        # 部署规格参数（治"慢"：消除冷启动排队与并发错配，官方 Optimize and scale 建议）
+        # min_instances：保持实例温热，避免冷启动（官方实测 ~4.7s vs 温启动 0.4s，上限 10）
+        min_instances = int(os.getenv("AGENT_MIN_INSTANCES", "1"))
+        # container_concurrency：ADK 异步 Agent 官方建议设为 9 的倍数（如 36），
+        # 高并发下最大延迟可从 ~60s 降至 ~7s；内存不足时调低并同时调小并发
+        container_concurrency = int(os.getenv("AGENT_CONTAINER_CONCURRENCY", "36"))
+        # resource_limits：默认高于官方缺省（cpu=4/mem=4Gi），为 36 并发预留余量防 OOM
+        resource_limits = {
+            "cpu": os.getenv("AGENT_CPU", "4"),
+            "memory": os.getenv("AGENT_MEMORY", "8Gi"),
+        }
+        print(
+            f"Deployment spec: min_instances={min_instances}, "
+            f"container_concurrency={container_concurrency}, resource_limits={resource_limits}"
+        )
+
+        remote_app = agent_engines.create(
+            agent_engine=app,
+            requirements=requirements_source,
+            extra_packages=[AGENT_WHL_FILE_NAME],
+            display_name=os.getenv("AGENT_DISPLAY_NAME", "WebEye Nexus Agent"),
+            min_instances=min_instances,
+            container_concurrency=container_concurrency,
+            resource_limits=resource_limits,
+            env_vars={
+                "LARK_AUTH_ID": os.getenv("LARK_AUTH_ID"),
+                "LARK_DOMAIN": os.getenv("LARK_DOMAIN"),
+                "LARK_CLIENT_ID": os.getenv("LARK_CLIENT_ID"),
+                "GOOGLE_WORKSPACE_AUTH_ID": os.getenv("GOOGLE_WORKSPACE_AUTH_ID"),
+                "GOOGLE_WORKSPACE_PROJECT_ID": os.getenv(
+                    "GOOGLE_WORKSPACE_PROJECT_ID", os.getenv("PROJECT_ID")
+                ),
+            },
+        )
+    except FuturesTimeoutError as e:
+        print(
+            "Deployment timed out while waiting for the Reasoning Engine LRO to finish. "
+            "This often means the remote build is still running rather than a hard failure."
+        )
+        print(
+            "Recommended actions: check Cloud Logging / Vertex AI Agent Engine console, "
+            "then rerun with a larger AGENT_ENGINE_CREATE_TIMEOUT_SECONDS if needed."
+        )
+        raise
+
+    print("Deployment finished!")
+    print(f"Resource Name: {remote_app.resource_name}")
+
+    # 自动回写到独立的 .deploy_env 文件
+    # 不再修改手动维护的 .env 文件
+    try:
+        dotenv.set_key(
+            DEPLOY_ENV_FILE,
+            "VERTEX_REASONING_ENGINE_NAME",
+            remote_app.resource_name,
+            quote_mode="always",
+        )
+        print(f"Successfully updated VERTEX_REASONING_ENGINE_NAME in {DEPLOY_ENV_FILE}")
+    except Exception as e:
+        print(f"Warning: Failed to update {DEPLOY_ENV_FILE}: {e}")
+
+
+if __name__ == "__main__":
+    _run_deploy()
