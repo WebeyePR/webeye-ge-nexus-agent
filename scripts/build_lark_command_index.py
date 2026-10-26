@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # 项目根目录与默认路径
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SKILLS_DIR = ROOT / "lib" / "lark-cli-v1.0.40" / "skills"
+DEFAULT_SKILLS_DIR = ROOT / "lib" / "lark-cli-v1.0.98" / "skills"
 DEFAULT_OUTPUT = ROOT / "nexus_agent" / "lark_registry" / "commands.json"
 
 # 默认的变动型（写/修改）命令及快捷方法词表，用于安全审计识别
