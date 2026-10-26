@@ -19,6 +19,7 @@ from vertexai import agent_engines
 dotenv.load_dotenv()
 
 from nexus_agent import root_agent
+from nexus_agent.deployement.streaming_app import StreamingAdkApp
 
 PYTHONPATH = os.environ.get("PYTHONPATH", ".")
 
@@ -111,8 +112,9 @@ vertexai.init(
 # eventually succeeds, so we extend the polling timeout here.
 polling.DEFAULT_POLLING = polling.DEFAULT_POLLING.with_timeout(CREATE_TIMEOUT_SECONDS)
 
-# Wrap the agent in an AdkApp object
-app = agent_engines.AdkApp(
+# 用 StreamingAdkApp 包装 Agent（在 GE 的 :streamQuery 链路上启用 SSE 流式，
+# 详见 nexus_agent/deployement/streaming_app.py 模块说明）
+app = StreamingAdkApp(
     agent=root_agent,
     enable_tracing=False,  # 彻底避开 OpenTelemetry 的 Context 冲突
     app_name="webeye-nexus-agent-app",
@@ -141,11 +143,30 @@ try:
     requirements_source = [AGENT_WHL_FILE_NAME] + load_project_requirements(PYPROJECT_FILE)
     print(f"Deploying using pyproject.toml requirements: {requirements_source}")
 
+    # 部署规格参数（治"慢"：消除冷启动排队与并发错配，官方 Optimize and scale 建议）
+    # min_instances：保持实例温热，避免冷启动（官方实测 ~4.7s vs 温启动 0.4s，上限 10）
+    min_instances = int(os.getenv("AGENT_MIN_INSTANCES", "1"))
+    # container_concurrency：ADK 异步 Agent 官方建议设为 9 的倍数（如 36），
+    # 高并发下最大延迟可从 ~60s 降至 ~7s；内存不足时调低并同时调小并发
+    container_concurrency = int(os.getenv("AGENT_CONTAINER_CONCURRENCY", "36"))
+    # resource_limits：默认高于官方缺省（cpu=4/mem=4Gi），为 36 并发预留余量防 OOM
+    resource_limits = {
+        "cpu": os.getenv("AGENT_CPU", "4"),
+        "memory": os.getenv("AGENT_MEMORY", "8Gi"),
+    }
+    print(
+        f"Deployment spec: min_instances={min_instances}, "
+        f"container_concurrency={container_concurrency}, resource_limits={resource_limits}"
+    )
+
     remote_app = agent_engines.create(
         agent_engine=app,
         requirements=requirements_source,
         extra_packages=[AGENT_WHL_FILE_NAME],
         display_name=os.getenv("AGENT_DISPLAY_NAME", "WebEye Nexus Agent"),
+        min_instances=min_instances,
+        container_concurrency=container_concurrency,
+        resource_limits=resource_limits,
         env_vars={
             "LARK_AUTH_ID": os.getenv("LARK_AUTH_ID"),
             "LARK_DOMAIN": os.getenv("LARK_DOMAIN"),
