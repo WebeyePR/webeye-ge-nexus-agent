@@ -20,10 +20,11 @@ dependencies = [
     # langchain_google_vertexai / langgraph 已移除（2026-10-26 二次审计）：
     # 生产代码与测试零引用，langgraph 仅是 ADK 可选 extra（extensions/all）；
     # cloudpickle 保留锁定——Agent Engine 序列化链路组件（aiplatform agent-engines extra）
-    "requests>=2.32.4",
-    "python-dotenv>=1.2.1",
-    "Pillow>=10.3.0",
-    "markdown>=3.5",
+    # 范围依赖下限 = 本地全量实测通过版本（2026-10-27，99 测试全绿 + 真实模型 E2E）
+    "requests>=2.34.2",
+    "python-dotenv>=1.2.4",
+    "Pillow>=13.0.0",
+    "markdown>=3.11.2",
 ]
 
 [build-system]

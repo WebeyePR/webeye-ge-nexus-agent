@@ -7,7 +7,7 @@
 *   **文档智能搜索**: 支持通过自然语言关键词搜索飞书云文档，并以 Markdown 超链接形式展示结果。
 *   **文档内容问答**: 支持读取飞书文档内容，包含 Markdown 文本与多模态图片内容，并基于文档内容回答问题。
 *   **AI 输出写入文档**: 支持将 Agent 生成的 Markdown 内容写入新的飞书云文档，或追加、覆盖更新已有文档，并返回文档链接、任务状态或更新结果；同时支持通过 Markdown → HTML 高保真管线创建/追加 Google Docs（自动格式转换，私有鉴权图片自动替换为安全隔离卡片）。
-*   **飞书生态操作扩展**: 内置 `lark-cli` 二进制与 308 条命令注册表（覆盖 19 个服务域），通过 CLI 封装或通用 OpenAPI 工具扩展 Drive、Wiki、Base、Sheets、Calendar、Task、IM、Mail 等飞书能力。
+*   **飞书生态操作扩展**: 内置 `lark-cli` 二进制（v1.0.98）与 497 条命令注册表（覆盖 22 个服务域），通过 CLI 封装或通用 OpenAPI 工具扩展 Drive、Wiki、Base、Sheets、Calendar、Task、IM、Mail、Approval、OKR、Minutes 等飞书能力。
 *   **Google Workspace 深度整合**: 内置 `gws` 二进制工具与 33 条命令注册表（覆盖 14 个服务域），支持通过 Gemini Enterprise OAuth2 注入的用户态凭证无缝调用 Google APIs——覆盖 Google Docs（创建/追加写入）、Google Sheets（读写）、Google Calendar（日程查询/创建）、Gmail、Slides、Tasks 等，实现跨生态办公联动。
 *   **命令自省与模糊匹配**: 随包发布 `commands.json` 命令元数据注册表，Agent 通过 `discover → get_spec → execute` 三步法自动发现并调用平台长尾命令，配合分词模糊匹配与 argv 逆向突变判定，无需逐个人工封装。
 *   **双生态 OAuth 安全认证**: 完美继承 Gemini Enterprise 的安全授权机制，支持飞书与 Google Workspace 双重 OAuth 认证流程。当检测到用户未授权时，会自动引导用户登录授权，确保企业数据安全合规。
@@ -281,7 +281,7 @@ uv run adk web
     uv sync
     ```
 *   **代码风格**: 遵循 Python 标准代码风格.
-*   **自动化测试**: 拥有覆盖核心工具、API 仓储、多模态回调及防崩溃安全守卫的完整测试套件。目前全量 **76 项单元测试 100% 绿旗通过**，有力地保障了在进行底层加固与扩展时的零回归、零崩溃：
+*   **自动化测试**: 拥有覆盖核心工具、API 仓储、多模态回调及防崩溃安全守卫的完整测试套件。目前全量 **99 项单元测试 100% 绿旗通过**，有力地保障了在进行底层加固与扩展时的零回归、零崩溃：
     ```bash
     .venv/bin/pytest -v
     ```
