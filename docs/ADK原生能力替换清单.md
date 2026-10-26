@@ -370,3 +370,16 @@ Docker 实测 `lark-cli api --help`（linux/amd64）：**原生支持 `--dry-run
 | 其余（MongoDB memory/A2A/workflow/eval/session rewind 等） | 场景无关 | 无动作 |
 
 **结论**：无立即升级需求（PyPI 最新仍 2.13.0）；两项相关修复随下个补丁版本升级时回归验证。
+
+## 十八、第十六遍审计（2026-10-27 01:00）——下载实证与审计正式关门
+
+**wheel 级官方产物实证（"联网+下载+源码"三要素闭环）**：
+- 从 PyPI 下载 google_adk-2.13.0 官方 wheel，sha256 与发布元数据**逐字节一致**（bec4c4ee…5f00）
+- 本地 site-packages 三个核心源文件（llm_agent.py / function_tool.py / app.py）与 wheel 内文件哈希**完全相同**
+- 结论：历轮十五遍全部源码结论均基于官方发布产物，不存在"本地版本被篡改/过期"的可能
+
+**llms-full.txt 判明**：官方 ADK 仓库文档转储（33,993 行，根目录 llms.txt 惯例），开发期参考知识文件，零代码引用——判定保留，非冗余。
+
+**最终门禁**：96 测试全绿、35 工具挂载正确、提交链完整（76f6ddf → b99e69e）。
+
+**审计正式关门**：ADK 表面五层穷尽（模块 113/32 域 → Agent 33 字段 → 工具类 91 → ToolContext 18 方法 → App/RunConfig 6+27 字段）+ 产物级哈希实证 + 文件层 74 个清点 + 工具层 35 个逐个裁决（1 个根除、替代表就绪）。无剩余未审视项；后续仅剩两类动作：① bash deploy.sh 上线（人工）；② 2.13.x 补丁发布后升级并回归 2 项相关修复（FunctionNode TypeAdapter、prompt-cache token 序列化）。
