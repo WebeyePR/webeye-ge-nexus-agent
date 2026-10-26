@@ -1394,7 +1394,11 @@ def _validate_lark_args(args: list, allow_mutating: bool) -> None:
         "--credentials-file",
     }
     for arg in args:
-        if arg.startswith("/") or ".." in arg:
+        if arg.startswith("/") and not arg.startswith("/open-apis/"):
+            # 文件系统绝对路径禁止；/open-apis/ 前缀是 Lark API 路径（api 服务的
+            # URL path 参数，非文件系统目标），允许以支撑通用 API 通道
+            raise ValueError("Absolute paths and parent-directory traversal are not allowed.")
+        if ".." in arg:
             raise ValueError("Absolute paths and parent-directory traversal are not allowed.")
         if arg in blocked_flags:
             raise ValueError(f"Flag {arg} is not allowed in the generic Lark executor.")
@@ -1528,6 +1532,11 @@ async def execute_lark_cli(
         dry_run: 默认安全使能（True）。如果判断为写突变操作且缺失 '--dry-run'，会自动补全。
         allow_mutating: 默认不使能（False）。突变修改类操作不加 '--dry-run' 时，此项必须声明为 True。
         timeout_seconds: 执行超时秒数，取值 10s ~ 300s，默认 120s。
+
+    通用 API 通道（api 服务）示例——用于注册表三步法之外的精确 API 语义场景：
+        1. 创建日历日程: args_json = '["api", "POST", "/open-apis/calendar/v4/calendars/<calendar_id>/events", "--data", "{\\"summary\\": \\"Project Sync\\", \\"start_time\\": {\\"timestamp\\": \\"1779866173\\"}, \\"end_time\\": {\\"timestamp\\": \\"1779869773\\"}}"]' （需 allow_mutating=True）
+        2. 发送消息: args_json = '["api", "POST", "/open-apis/im/v1/messages?receive_id_type=chat_id", "--data", "{\\"receive_id\\": \\"oc_xxx\\", \\"msg_type\\": \\"text\\", \\"content\\": \\"{\\\\\\"text\\\\\\": \\\\\\"Hello\\\\\\"}\\"}"]' （需 allow_mutating=True）
+        3. 查询记录: args_json = '["api", "GET", "/open-apis/bitable/v1/apps/<app_token>/tables/<table_id>/records", "--params", "{\\"page_size\\": 20}"]'
     """
     try:
         args = _parse_lark_args(args_json)
@@ -2327,79 +2336,6 @@ async def delete_lark_document(
     except Exception as e:
         logger.error(f"Failed to delete Lark document: {str(e)}")
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: str(e)}
-
-
-async def execute_lark_api(
-    method: str,
-    path: str,
-    tool_context: ToolContext,
-    params_json: str = "",
-    data_json: str = "",
-    file_path: str = "",
-) -> dict:
-    """
-    [Universal Tool] Executes any Lark Open API command via the Lark CLI. 
-    Use this when no specific tool is available for a desired Lark feature (e.g., Calendar, Bitable, Task, Message).
-    **CRITICAL**: Keep your `params_json` and `data_json` as flat, clean single-layer JSON strings to avoid nesting quote errors!
-
-    ### 100% REAL & VERIFIED LARK API EXAMPLES TO PREVENT HALLUCINATION:
-    
-    1. **Create a Calendar Event (创建日历日程)**:
-       - **method**: 'POST'
-       - **path**: '/open-apis/calendar/v4/calendars/feishu.cn_xxxxxxxx_xxxx/events'
-       - **data_json**: '{"summary": "Project Sync", "start_time": {"timestamp": "1779866173"}, "end_time": {"timestamp": "1779869773"}}'
-       
-    2. **Add a Bitable Record (向多维表格添加单条记录)**:
-       - **method**: 'POST'
-       - **path**: '/open-apis/bitable/v1/apps/bascnxxxxxxxxx/tables/tblxxxxxxxxx/records'
-       - **data_json**: '{"fields": {"Task Name": "Refactor Code", "Status": "In Progress"}}'
-       
-    3. **Send a Group Message (发送群组消息/单聊消息)**:
-       - **method**: 'POST'
-       - **path**: '/open-apis/im/v1/messages?receive_id_type=chat_id'
-       - **data_json**: '{"receive_id": "oc_xxxxxxxxxxxxxxxx", "msg_type": "text", "content": "{\\"text\\": \\"Hello World\\"}"}'
-
-    Args:
-        method: HTTP method (GET, POST, PUT, DELETE, PATCH).
-        path: API endpoint path (e.g., '/open-apis/calendar/v4/calendars').
-        tool_context: The tool execution context.
-        params_json: Optional JSON string of query parameters, e.g., '{"receive_id_type": "chat_id"}'.
-        data_json: Optional JSON string for the request body. No nested double-quotes except standard escaping!
-        file_path: Optional. Local path to a file for multipart/form-data uploads. Absolute paths and directory traversal are blocked.
-
-    Returns:
-        dict: The JSON response from the Lark API.
-    """
-    try:
-        access_token = get_access_token(tool_context)
-        if not access_token:
-            return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "Authentication required."}
-
-        args = [method.upper(), path]
-        params_arg = _coerce_json_cli_arg(params_json, "params_json")
-        data_arg = _coerce_json_cli_arg(data_json, "data_json")
-        if params_arg:
-            args += ["--params", params_arg]
-        if data_arg:
-            args += ["--data", data_arg]
-        if file_path and file_path.strip():
-            file_clean = file_path.strip()
-            if "/" in file_clean or ".." in file_clean:
-                return {
-                    STATUS_KEY: STATUS_ERROR,
-                    MESSAGE_KEY: "Absolute paths and parent-directory traversal are blocked for file_path."
-                }
-            args += ["--file", file_clean]
-
-        return await asyncio.to_thread(
-            cli_client.run_command, "api", "", args, access_token, LARK_CLIENT_ID
-        )
-    except Exception as e:
-        logger.error(f"Universal API call failed: {str(e)}")
-        return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: str(e)}
-
-
-
 async def feishu_mcp_create_doc(
     title: str = "",
     markdown: str = "",

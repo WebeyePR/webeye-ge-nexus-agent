@@ -12,7 +12,6 @@ from .tools import (
     create_lark_document,
     update_lark_document,
     delete_lark_document,
-    execute_lark_api,
     feishu_mcp_create_doc,
     feishu_mcp_update_doc,
     feishu_mcp_fetch_doc,
@@ -79,7 +78,7 @@ You help premium enterprise users seamlessly operate across the Feishu/Lark ecos
   * `create_lark_document` / `update_lark_document`: Synchronous CLI fallback（直连同步返回，无任务 ID）。仅当 MCP 路径不可用或需要极简快速写入时使用，不与首选路径混用。
   * `save_ai_output_to_feishu_doc` / `save_ai_output_to_existing_feishu_doc`: Automatically export your polished generated answers, analytical summaries, and structures into gorgeous new or existing Feishu documents.
   * `feishu_mcp_fetch_doc`: Fetch an existing Lark document's full markdown by token/URL (读取侧的 MCP 通道).
-  * `execute_lark_api`: [Universal Tool] 直接执行任意飞书开放平台 API（CLI 总线底层通道），用于三步法之外需要精确 API 语义的场景。
+  * `execute_lark_cli`: [Universal Tool] 执行任意飞书 CLI 命令，含通用 API 通道（args 首元素为 "api"）——三步法之外需要精确 API 语义的场景统一走此总线（自动获得注册表校验与干跑门控）。
   * `get_access_token`: 仅用于诊断当前用户的飞书授权状态（返回 token 是否存在/有效性摘要），不要在正常业务流程中主动调用。
 
 ### 🚀 Feishu/Lark Advanced Command Orchestration (飞书底层 CLI 超级总线)
@@ -186,7 +185,8 @@ def _confirm_real_mutation(**kwargs) -> bool:
 # ADK 2.13 原生 require_confirmation 硬确认（开发期采纳，长期架构）：
 # - delete_lark_document：不可逆删除，恒要求框架级确认
 # - 4 个 CLI 总线工具：动态确认（干跑放行、真执行拦截）
-# - execute_lark_api 无干跑参数，突变判别不可靠，仍走指令层审计 + ToolAuditPlugin
+# （历史注：execute_lark_api 已删除——CLI 总线完全覆盖其能力且更安全，
+#   原"无干跑参数"的审计边界随之根除）
 # 回退开关：AGENT_ENABLE_TOOL_CONFIRMATION=0（GE 界面确认事件流验证未过时使用，
 # 见 docs/升级后全量功能验证清单.md F5）
 _ENABLE_TOOL_CONFIRMATION = os.getenv("AGENT_ENABLE_TOOL_CONFIRMATION", "1") == "1"
@@ -211,8 +211,7 @@ root_agent = Agent(
         update_lark_document,
         FunctionTool(delete_lark_document, require_confirmation=True)
         if _ENABLE_TOOL_CONFIRMATION
-        else delete_lark_document,
-        execute_lark_api,
+        else         delete_lark_document,
         feishu_mcp_create_doc,
         feishu_mcp_update_doc,
         feishu_mcp_fetch_doc,

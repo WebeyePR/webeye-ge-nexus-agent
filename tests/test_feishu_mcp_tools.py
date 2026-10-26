@@ -2,6 +2,8 @@ import asyncio
 import os
 import sys
 
+import pytest
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from nexus_agent.infrastructure.lark_api_repository import _extract_mcp_result, _normalize_mcp_tool_result
@@ -197,48 +199,31 @@ def test_wait_for_feishu_doc_update_task_returns_running_after_timeout(monkeypat
     assert len(progress) == 2
 
 
-def test_execute_lark_api_uses_json_string_args(monkeypatch):
-    captured = {}
-
-    def fake_run_command(service, command, args, access_token, app_id):
-        captured["service"] = service
-        captured["command"] = command
-        captured["args"] = args
-        captured["access_token"] = access_token
-        return {"status": "success", "data": {"ok": True}}
-
-    monkeypatch.setattr(lark_tools.cli_client, "run_command", fake_run_command)
-
-    result = asyncio.run(lark_tools.execute_lark_api(
-        method="GET",
-        path="/open-apis/calendar/v4/calendars",
-        params_json='{"page_size":10}',
-        data_json='{"name":"team"}',
-        tool_context="fake-token",
-    ))
-
-    assert result["status"] == "success"
-    assert captured["service"] == "api"
-    assert captured["args"] == [
-        "GET",
-        "/open-apis/calendar/v4/calendars",
-        "--params",
-        '{"page_size":10}',
-        "--data",
-        '{"name":"team"}',
-    ]
+def test_execute_lark_cli_api_channel_equivalence():
+    """execute_lark_api 已删除——其 api 语义由 execute_lark_cli 的 api 服务等价承载，
+    且新增注册表校验与干跑门控（安全性提升）。"""
+    # GET 查询：无需 allow_mutating
+    lark_tools._validate_lark_args(
+        ["api", "GET", "/open-apis/calendar/v4/calendars", "--params", '{"page_size":10}'],
+        allow_mutating=False,
+    )
+    # POST 写突变：不加 --dry-run 时必须显式 allow_mutating=True
+    with pytest.raises(ValueError, match="dry-run|allow_mutating"):
+        lark_tools._validate_lark_args(
+            ["api", "POST", "/open-apis/im/v1/messages", "--data", '{"x":1}'],
+            allow_mutating=False,
+        )
+    # allow_mutating=True 时放行
+    lark_tools._validate_lark_args(
+        ["api", "POST", "/open-apis/im/v1/messages", "--data", '{"x":1}'],
+        allow_mutating=True,
+    )
 
 
-def test_execute_lark_api_rejects_invalid_json_string():
-    result = asyncio.run(lark_tools.execute_lark_api(
-        method="POST",
-        path="/open-apis/test",
-        params_json="{bad-json}",
-        tool_context="fake-token",
-    ))
-
-    assert result["status"] == "error"
-    assert "must be a valid, standard JSON string" in result["message"]
+def test_json_arg_coercion_rejects_invalid_json_string():
+    """原 execute_lark_api 的 JSON 参数校验语义由共享助手保持。"""
+    with pytest.raises(ValueError, match="must be a valid, standard JSON string"):
+        lark_tools._coerce_json_cli_arg("{bad-json}", "params_json")
 
 
 def test_get_lark_document_markdown_success(monkeypatch):

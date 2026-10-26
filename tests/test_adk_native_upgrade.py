@@ -36,10 +36,11 @@ class TestLongRunningTaskTools:
         tool_objects = root_agent.tools
         lrfts = [t for t in tool_objects if isinstance(t, LongRunningFunctionTool)]
         assert len(lrfts) == 2, f"agent 应挂载 2 个长任务工具，实际 {len(lrfts)}"
-        # 36 个挂载项 = 29 个普通函数（ADK 运行时自动包装）+ 5 个显式
+        # 35 个挂载项 = 28 个普通函数（ADK 运行时自动包装）+ 5 个显式
         # FunctionTool 硬确认包装（delete 恒确认 + 4 个 CLI 总线动态确认）+ 2 个长任务
+        # （execute_lark_api 已删除：CLI 总线完全覆盖且更安全，36→35）
         others = [t for t in tool_objects if not isinstance(t, LongRunningFunctionTool)]
-        assert len(others) == 34
+        assert len(others) == 33
         assert all(
             callable(t) or (isinstance(t, FunctionTool) and callable(t.func))
             for t in others
