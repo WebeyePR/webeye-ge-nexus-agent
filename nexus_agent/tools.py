@@ -4,7 +4,7 @@ import re
 import time
 
 
-from google.adk.tools import ToolContext
+from google.adk.tools import LongRunningFunctionTool, ToolContext
 
 from nexus_agent.config import (
     GOOGLE_WORKSPACE_AUTH_ID,
@@ -1769,49 +1769,6 @@ def query_lark_documents(query: str, tool_context: ToolContext) -> dict:
         }
 
 
-def get_lark_document_content(
-    doc_token: str, tool_context: ToolContext, doc_type: str = "docx"
-) -> dict:
-    """
-    Retrieves the content of a specific Lark document in Markdown format.
-
-    Args:
-        doc_token: The unique identifier of the document.
-        tool_context: The tool execution context.
-        doc_type: The document type (doc, docx, sheet, bitable). Defaults to 'docx'.
-
-    Returns:
-        dict: A dictionary containing the document content if successful.
-              - On success: {'status': 'success', 'content': '...markdown content...'}
-              - On error: {'status': 'error', 'message': ...}
-    """
-    try:
-        access_token = get_access_token(tool_context)
-
-        if not access_token:
-            return {
-                STATUS_KEY: STATUS_ERROR,
-                MESSAGE_KEY: "Access token is missing. Please ensure OAuth is configured.",
-            }
-
-        content = lark_api_repository.get_document_content(
-            access_token, doc_token, doc_type
-        )
-
-        return {STATUS_KEY: STATUS_SUCCESS, "content": content}
-
-    except Exception as e:
-        import traceback
-
-        error_detail = traceback.format_exc()
-        logger.error(f"Failed to get document content: {error_detail}")
-        return {
-            STATUS_KEY: STATUS_ERROR,
-            MESSAGE_KEY: f"Failed to get document content for token {doc_token} (type: {doc_type}): {str(e)}",
-            "debug_info": error_detail,
-        }
-
-
 async def get_lark_document_markdown(
     doc_token: str, tool_context: ToolContext, download_images: bool = False
 ) -> dict:
@@ -1932,30 +1889,6 @@ async def get_lark_document_markdown(
             MESSAGE_KEY: f"Failed to get document markdown for token {doc_token}: {str(e)}",
             "debug_info": error_detail,
         }
-
-
-def show_user_auth_info(tool_context: ToolContext) -> str:
-    """
-    Displays the current user authentication information using the standard ADK auth response format.
-
-    Args:
-        tool_context: The tool execution context.
-
-    Returns:
-        The authentication information.
-    """
-    token = ""
-    try:
-        token = get_access_token(tool_context)
-        if not token:
-            token = f"""tool_context.state[f"temp:{LARK_AUTH_ID}"] is None"""
-    except Exception as e:
-        token = (
-            """tool_context.state[f"temp:{LARK_AUTH_ID}"] raised exception: """ + str(e)
-        )
-
-    tool_context.state["LARK_AUTH_INFO"] = token
-    return str(tool_context.state.to_dict())
 
 
 def get_lark_document_content_pdf(
@@ -2597,10 +2530,25 @@ def wait_for_feishu_doc_create_task(
     tool_context: ToolContext,
     max_polls: int = 10,
     poll_interval_seconds: float = 1.0,
-) -> dict:
-    """
-    Poll a previously submitted create-doc async task until it completes or the
-    polling window is exhausted.
+):
+    """[ADK 原生长任务] 轮询此前提交的 create-doc 异步任务直至完成。
+
+    基于 ADK 2.x LongRunningFunctionTool 机制：轮询期间每次 yield 的进度
+    快照会作为中间事件流式推送给用户（GE 侧实时可见），最终 return 值
+    才是任务的最终 FunctionResponse，无需模型反复手动重试调用。
+
+    Args:
+        task_id: create-doc 返回的异步任务 ID。
+        tool_context: 工具执行上下文。
+        max_polls: 最大轮询次数，默认 10。
+        poll_interval_seconds: 轮询间隔秒数，默认 1.0。
+
+    Yields:
+        dict: 每轮轮询的进度快照（completed=False，poll_attempts 为当前次数）。
+
+    Returns:
+        dict: 最终结果。completed=True 时携带 doc_id/doc_url 等字段；
+              completed=False 表示在轮询窗口内任务仍未完成。
     """
     if not task_id.strip():
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "task_id is required."}
@@ -2623,6 +2571,13 @@ def wait_for_feishu_doc_create_task(
                 f"Create task '{task_id}' completed after {attempt} poll(s)."
             )
             return result
+        yield {
+            STATUS_KEY: STATUS_SUCCESS,
+            "completed": False,
+            "task_id": task_id,
+            "poll_attempts": attempt,
+            "progress": f"Create task is running ({attempt}/{max_polls} polls)...",
+        }
         if attempt < max_polls:
             time.sleep(poll_interval_seconds)
 
@@ -2644,10 +2599,25 @@ def wait_for_feishu_doc_update_task(
     tool_context: ToolContext,
     max_polls: int = 10,
     poll_interval_seconds: float = 1.0,
-) -> dict:
-    """
-    Poll a previously submitted update-doc async task until it completes or the
-    polling window is exhausted.
+):
+    """[ADK 原生长任务] 轮询此前提交的 update-doc 异步任务直至完成。
+
+    基于 ADK 2.x LongRunningFunctionTool 机制：轮询期间每次 yield 的进度
+    快照会作为中间事件流式推送给用户（GE 侧实时可见），最终 return 值
+    才是任务的最终 FunctionResponse，无需模型反复手动重试调用。
+
+    Args:
+        task_id: update-doc 返回的异步任务 ID。
+        tool_context: 工具执行上下文。
+        max_polls: 最大轮询次数，默认 10。
+        poll_interval_seconds: 轮询间隔秒数，默认 1.0。
+
+    Yields:
+        dict: 每轮轮询的进度快照（completed=False，poll_attempts 为当前次数）。
+
+    Returns:
+        dict: 最终结果。completed=True 时携带 doc_id/doc_url 等字段；
+              completed=False 表示在轮询窗口内任务仍未完成。
     """
     if not task_id.strip():
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "task_id is required."}
@@ -2670,6 +2640,13 @@ def wait_for_feishu_doc_update_task(
                 f"Update task '{task_id}' completed after {attempt} poll(s)."
             )
             return result
+        yield {
+            STATUS_KEY: STATUS_SUCCESS,
+            "completed": False,
+            "task_id": task_id,
+            "poll_attempts": attempt,
+            "progress": f"Update task is running ({attempt}/{max_polls} polls)...",
+        }
         if attempt < max_polls:
             time.sleep(poll_interval_seconds)
 
@@ -2684,6 +2661,11 @@ def wait_for_feishu_doc_update_task(
         "summary": f"Update task '{task_id}' is still running after {max_polls} poll(s).",
         "raw_result": last_result,
     }
+
+
+# 以 ADK 原生 LongRunningFunctionTool 挂载：进度流式可见、框架托管轮询生命周期。
+wait_for_feishu_doc_create_task_tool = LongRunningFunctionTool(wait_for_feishu_doc_create_task)
+wait_for_feishu_doc_update_task_tool = LongRunningFunctionTool(wait_for_feishu_doc_update_task)
 
 
 def feishu_mcp_update_doc(

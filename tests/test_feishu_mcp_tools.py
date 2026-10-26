@@ -123,6 +123,16 @@ def test_save_ai_output_to_existing_feishu_doc_requires_doc_id():
     assert result["message"] == "doc_id is required."
 
 
+def _run_long_running(gen):
+    """驱动长任务生成器：收集 yield 的进度快照，返回 (progress, final_result)。"""
+    progress = []
+    try:
+        while True:
+            progress.append(next(gen))
+    except StopIteration as stop:
+        return progress, stop.value
+
+
 def test_wait_for_feishu_doc_create_task_completes_after_second_poll(monkeypatch):
     calls = {"count": 0}
 
@@ -143,17 +153,21 @@ def test_wait_for_feishu_doc_create_task_completes_after_second_poll(monkeypatch
 
     monkeypatch.setattr(lark_tools, "feishu_mcp_create_doc", fake_create_doc)
 
-    result = lark_tools.wait_for_feishu_doc_create_task(
+    progress, result = _run_long_running(lark_tools.wait_for_feishu_doc_create_task(
         task_id="task_123",
         tool_context="fake-token",
         max_polls=3,
         poll_interval_seconds=0,
-    )
+    ))
 
     assert result["status"] == "success"
     assert result["completed"] is True
     assert result["poll_attempts"] == 2
     assert result["doc_id"] == "doxcn123"
+    # ADK 原生长任务：第 1 次轮询未完成时应 yield 出进度快照
+    assert len(progress) == 1
+    assert progress[0]["completed"] is False
+    assert progress[0]["poll_attempts"] == 1
 
 
 def test_wait_for_feishu_doc_update_task_returns_running_after_timeout(monkeypatch):
@@ -166,17 +180,18 @@ def test_wait_for_feishu_doc_update_task_returns_running_after_timeout(monkeypat
 
     monkeypatch.setattr(lark_tools, "feishu_mcp_update_doc", fake_update_doc)
 
-    result = lark_tools.wait_for_feishu_doc_update_task(
+    progress, result = _run_long_running(lark_tools.wait_for_feishu_doc_update_task(
         task_id="task_456",
         tool_context="fake-token",
         max_polls=2,
         poll_interval_seconds=0,
-    )
+    ))
 
     assert result["status"] == "success"
     assert result["completed"] is False
     assert result["poll_attempts"] == 2
     assert result["task_id"] == "task_456"
+    assert len(progress) == 2
 
 
 def test_execute_lark_api_uses_json_string_args(monkeypatch):

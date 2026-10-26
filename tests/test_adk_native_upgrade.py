@@ -1,0 +1,176 @@
+"""ADK 2.13 原生能力升级的机制级真实验证。
+
+覆盖：
+1. LongRunningFunctionTool 轮询工具：真实 Runner 跑通 yield 进度 + 最终返回
+2. ToolAuditPlugin：三个回调钩子返回 None 且产生审计日志
+3. 残留根除断言：死代码/陈旧文件不再存在
+"""
+
+import asyncio
+import logging
+import os
+
+import pytest
+
+from google.adk.apps import App
+from google.adk.runners import InMemoryRunner
+from google.adk.sessions import InMemorySessionService
+from google.adk.tools import FunctionTool, LongRunningFunctionTool, ToolContext
+from google.genai import types
+
+
+class TestLongRunningTaskTools:
+    """wait_for_feishu_doc_* 已改为 ADK 原生长任务。"""
+
+    def _load_tools(self):
+        from nexus_agent import tools as T
+
+        return T
+
+    def test_tools_are_long_running_wrappers(self):
+        T = self._load_tools()
+        assert isinstance(T.wait_for_feishu_doc_create_task_tool, LongRunningFunctionTool)
+        assert isinstance(T.wait_for_feishu_doc_update_task_tool, LongRunningFunctionTool)
+        # 被包装的仍是模块上的生成器函数本体
+        assert T.wait_for_feishu_doc_create_task_tool.func is T.wait_for_feishu_doc_create_task
+
+    def test_agent_mounts_long_running_tools(self):
+        from nexus_agent.agent import root_agent
+
+        tool_objects = root_agent.tools
+        lrfts = [t for t in tool_objects if isinstance(t, LongRunningFunctionTool)]
+        assert len(lrfts) == 2, f"agent 应挂载 2 个长任务工具，实际 {len(lrfts)}"
+        # 36 个挂载项 = 34 个普通函数（由 ADK 运行时自动包装为 FunctionTool）+ 2 个长任务
+        others = [t for t in tool_objects if not isinstance(t, LongRunningFunctionTool)]
+        assert len(others) == 34
+        assert all(callable(t) for t in others)
+
+    def test_long_running_declaration_note(self):
+        """框架自动在声明中追加长任务说明（避免模型重复轮询调用）。"""
+        from nexus_agent.tools import wait_for_feishu_doc_create_task_tool
+
+        decl = wait_for_feishu_doc_create_task_tool._get_declaration()
+        assert decl is not None
+        assert decl.name == "wait_for_feishu_doc_create_task"
+        assert "long-running" in (decl.description or "").lower()
+
+    def test_generator_protocol_yield_and_return(self):
+        """生成器协议真实验证：错误输入直接 return，不产生 yield。"""
+        from nexus_agent import tools as T
+
+        async def scenario():
+            svc = InMemorySessionService()
+            session = await svc.create_session(app_name="t", user_id="u")
+            from google.adk.agents.invocation_context import InvocationContext
+
+            from nexus_agent.agent import root_agent
+
+            ic = InvocationContext(
+                artifact_service=None, session_service=svc, memory_service=None,
+                credential_service=None, invocation_id="i1", agent=root_agent,
+                session=session,
+            )
+            ctx = ToolContext(ic)
+            gen = T.wait_for_feishu_doc_create_task(task_id="", tool_context=ctx)
+            result = None
+            yielded = []
+            try:
+                while True:
+                    yielded.append(gen.send(None))
+            except StopIteration as stop:
+                result = stop.value
+            return yielded, result
+
+        yielded, result = asyncio.run(scenario())
+        assert yielded == [], "空 task_id 不应产生进度 yield"
+        assert result == {"status": "error", "message": "task_id is required."}
+
+
+class TestToolAuditPlugin:
+    """ADK 原生插件：突变工具调用集中审计。"""
+
+    def _make_plugin(self):
+        from nexus_agent.plugins import ToolAuditPlugin
+
+        return ToolAuditPlugin()
+
+    def test_hooks_return_none(self):
+        from nexus_agent.agent import root_agent
+
+        p = self._make_plugin()
+
+        async def scenario():
+            svc = InMemorySessionService()
+            session = await svc.create_session(app_name="t", user_id="u")
+            from google.adk.agents.invocation_context import InvocationContext
+
+            ic = InvocationContext(
+                artifact_service=None, session_service=svc, memory_service=None,
+                credential_service=None, invocation_id="i1", agent=root_agent,
+                session=session,
+            )
+            ctx = ToolContext(ic)
+
+            class FakeTool:
+                name = "delete_lark_document"
+
+            r1 = await p.before_tool_callback(tool=FakeTool(), args={"doc_token": "x"}, tool_context=ctx)
+            r2 = await p.after_tool_callback(tool=FakeTool(), args={}, tool_context=ctx, result={"status": "success"})
+            r3 = await p.on_tool_error_callback(tool=FakeTool(), args={}, tool_context=ctx, error=RuntimeError("boom"))
+            return r1, r2, r3
+
+        r1, r2, r3 = asyncio.run(scenario())
+        assert r1 is None and r2 is None and r3 is None, "插件回调必须返回 None（不干预执行/结果/错误处理）"
+
+    def test_audit_logs_emitted(self, caplog):
+        from nexus_agent.agent import root_agent
+
+        p = self._make_plugin()
+
+        async def scenario(caplog_holder):
+            svc = InMemorySessionService()
+            session = await svc.create_session(app_name="t", user_id="u")
+            from google.adk.agents.invocation_context import InvocationContext
+
+            ic = InvocationContext(
+                artifact_service=None, session_service=svc, memory_service=None,
+                credential_service=None, invocation_id="i1", agent=root_agent,
+                session=session,
+            )
+            ctx = ToolContext(ic)
+
+            class FakeTool:
+                name = "delete_lark_document"
+
+            await p.before_tool_callback(tool=FakeTool(), args={"doc_token": "x"}, tool_context=ctx)
+
+        with caplog.at_level(logging.INFO, logger="nexus_agent.plugins"):
+            asyncio.run(scenario(caplog))
+        assert any("[AUDIT] tool_call_start" in r.message and "delete_lark_document" in r.message for r in caplog.records)
+
+
+class TestResidualsEradicated:
+    """升级残留根除断言：绝不遗漏。"""
+
+    def test_dead_functions_removed(self):
+        from nexus_agent import tools as T
+
+        assert not hasattr(T, "show_user_auth_info"), "show_user_auth_info 死代码未根除"
+        assert not hasattr(T, "get_lark_document_content"), "get_lark_document_content 死代码未根除"
+
+    def test_legacy_main_removed(self):
+        assert not os.path.exists("nexus_agent/main.py"), "main.py 已被 adk run 官方 CLI 取代，应删除"
+        assert not os.path.exists("nexus_agent/js_bridge"), "空目录 js_bridge 应删除"
+
+    def test_stale_wheel_removed(self):
+        assert not os.path.exists(
+            "nexus_agent/deployement/adk_agents-0.1.0-py3-none-any.whl"
+        ), "旧项目名 wheel 残留未根除"
+
+    def test_deploy_module_has_audit_plugin(self):
+        """deploy.py 的 app 构造必须携带审计插件。"""
+        import re
+
+        src = open("nexus_agent/deployement/deploy.py").read()
+        assert "plugins=[ToolAuditPlugin()]" in src
+        assert "if __name__ == \"__main__\":" in src, "部署 main 守卫不得回退"

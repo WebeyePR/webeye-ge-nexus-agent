@@ -20,6 +20,7 @@ dotenv.load_dotenv()
 
 from nexus_agent import root_agent
 from nexus_agent.deployement.streaming_app import StreamingAdkApp
+from nexus_agent.plugins import ToolAuditPlugin
 
 PYTHONPATH = os.environ.get("PYTHONPATH", ".")
 
@@ -118,6 +119,7 @@ app = StreamingAdkApp(
     agent=root_agent,
     enable_tracing=False,  # 彻底避开 OpenTelemetry 的 Context 冲突
     app_name="webeye-nexus-agent-app",
+    plugins=[ToolAuditPlugin()],  # ADK 原生插件：突变类工具调用集中审计
 )
 
 def _run_deploy() -> None:
