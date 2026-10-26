@@ -165,7 +165,20 @@ class TestResidualsEradicated:
         assert "ToolAuditPlugin()" in src
         assert "ReflectAndRetryModelPlugin()" in src, "模型瞬时故障自愈重试插件不得缺失"
         assert "from google.adk.plugins import ReflectAndRetryModelPlugin" in src
+        assert "ContextCacheConfig(min_tokens=4096)" in src, "ADK 原生上下文缓存不得缺失"
+        assert "AGENT_ENABLE_CONTEXT_CACHE" in src, "上下文缓存回退开关不得缺失"
         assert "if __name__ == \"__main__\":" in src, "部署 main 守卫不得回退"
+
+    def test_context_cache_config_semantics(self):
+        """ADK 原生上下文缓存配置语义正确（Gemini 3 门槛 4096）。"""
+
+        from google.adk.agents.context_cache_config import ContextCacheConfig
+        from google.adk.apps import App
+
+        cfg = ContextCacheConfig(min_tokens=4096)
+        assert cfg.min_tokens == 4096
+        assert "context_cache_config" in App.model_fields
+        assert "resumability_config" in App.model_fields
 
     def test_reflect_retry_model_plugin_defaults(self):
         """ADK 原生模型自愈重试插件可用且默认 3 次重试。"""

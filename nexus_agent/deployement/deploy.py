@@ -116,15 +116,40 @@ polling.DEFAULT_POLLING = polling.DEFAULT_POLLING.with_timeout(CREATE_TIMEOUT_SE
 
 # 用 StreamingAdkApp 包装 Agent（在 GE 的 :streamQuery 链路上启用 SSE 流式，
 # 详见 nexus_agent/deployement/streaming_app.py 模块说明）
-app = StreamingAdkApp(
-    agent=root_agent,
-    enable_tracing=False,  # 彻底避开 OpenTelemetry 的 Context 冲突
-    app_name="webeye-nexus-agent-app",
-    plugins=[
+#
+# ADK 2.13 原生上下文缓存（App 级 ContextCacheConfig）：instruction ~5k tokens +
+# 36 工具 schema 远超 Gemini 3 的 4096 缓存门槛，跨轮复用前缀显著降本提速；
+# 缓存创建失败时官方设计为优雅降级（请求照常、不缓存）。环境变量可关。
+from google.adk.apps import App
+from google.adk.agents.context_cache_config import ContextCacheConfig
+
+if os.getenv("AGENT_ENABLE_CONTEXT_CACHE", "1") == "0":
+    # 回退路径：不预构建 App，保持模板默认行为（agent + app_name 显式传入）
+    app = StreamingAdkApp(
+        agent=root_agent,
+        enable_tracing=False,  # 彻底避开 OpenTelemetry 的 Context 冲突
+        app_name="webeye-nexus-agent-app",
+        plugins=[
+            ToolAuditPlugin(),
+            ReflectAndRetryModelPlugin(),
+        ],
+    )
+else:
+    _plugins = [
         ToolAuditPlugin(),  # ADK 原生插件：突变类工具调用集中审计
         ReflectAndRetryModelPlugin(),  # ADK 原生插件：模型瞬时故障自愈重试（并发安全，默认 3 次）
-    ],
-)
+    ]
+    _deploy_app = App(
+        name="webeye-nexus-agent-app",
+        root_agent=root_agent,
+        plugins=_plugins,  # 预构建 App 时插件必须挂在 App 上（AdkApp 禁止重复传入）
+        context_cache_config=ContextCacheConfig(min_tokens=4096),
+    )
+    # app_name/agent/plugins 均禁止传入（由 App 派生）
+    app = StreamingAdkApp(
+        app=_deploy_app,
+        enable_tracing=False,  # 彻底避开 OpenTelemetry 的 Context 冲突
+    )
 
 def _run_deploy() -> None:
     """执行真实部署。仅在本模块作为脚本运行时触发（防 import 副作用误部署）。"""
