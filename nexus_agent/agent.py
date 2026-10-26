@@ -177,7 +177,11 @@ root_agent = Agent(
     model=os.getenv("MODEL_NAME", "gemini-3-flash-preview"),
     name="webeye_nexus_agent",
     description="WebEye Nexus Agent for Gemini Enterprise: an ADK-based enterprise agent for Feishu/Lark and Google Workspace operations.",
-    instruction=system_instruction,
+    # ADK 2.13 原生：指令为纯静态文本（无状态占位符），置于 static_instruction
+    # ——作为 system_instruction 开头直发、免每轮状态解析，并与 App 级
+    # ContextCacheConfig（deploy.py）组成官方推荐的缓存优化组合：
+    # 静态前缀（本指令）→ 可缓存；动态内容（instruction，此处为空）→ user content
+    static_instruction=system_instruction,
     tools=[
         query_lark_documents,
         get_lark_document_markdown,
