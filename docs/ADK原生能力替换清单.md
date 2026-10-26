@@ -87,3 +87,26 @@
 | 7 | 全仓 `__build_response_event` / `__multimodal_parts__` / monkey-patch 模式扫描 | 零残留 | grep 确认 |
 
 **二次审计结论**：首轮清单覆盖完整，无漏审文件；本轮净效果 = 依赖精简 2 项 + 构建链路修复 + 静态检查清零。
+
+## 五、第三遍防遗漏审计（2026-10-26 23:52 补充）
+
+联网核对 PyPI/官方发布线（公开报道最新至 2.10.0，本项目已在 2.13.0，**版本领先无需升级**），并对 2.9–2.13 新增原生能力逐项评估采纳：
+
+| # | ADK 2.13 原生能力 | 评估结论 | 理由 |
+|---|------|------|------|
+| 1 | `ReflectAndRetryModelPlugin`（模型瞬时故障自愈重试） | **✅ 已采纳接入** deploy.py | 并发安全、零配置、默认 3 次重试；直接减少 429/5xx 硬失败，利好稳定性与延迟 |
+| 2 | `ReflectAndRetryToolPlugin`（工具失败自愈重试） | ❌ 不采纳 | 本项目工具从不抛异常（结构化错误返回协议），插件无从触发；且突变类工具盲目重试有重复副作用风险 |
+| 3 | `ToolCallIntegrityPlugin`（HMAC 工具调用完整性） | ❌ 不采纳 | 防会话篡改威胁模型；Agent Engine 托管会话场景不适用，且引入密钥管理负担 |
+| 4 | `LoggingPlugin` / `DebugLoggingPlugin` | ❌ 不采纳 | 已有结构化日志（logger + ToolAuditPlugin 审计），生产环境无需冗余调试输出 |
+| 5 | `Workflow`（图工作流）/ Task API | ❌ 不采纳 | 本项目为单 Agent + 28 工具形态，无确定性编排诉求 |
+| 6 | FallbackModel（2.9，本机 2.13 未含此模块） | ❌ 不适用 | 模块在 2.13 不存在（2.9 引入后调整）；且 Vertex 单模型栈无备用模型配置 |
+| 7 | Skill 生命周期（2.10 实验，需环境开关） | ❌ 不适用 | 项目无 Skill 形态 |
+| 8 | MongoDB toolset / eval 效率指标 / LiveKit | ❌ 不适用 | 与项目场景无关 |
+
+**阻塞点全链路终验**（第三遍逐层核对，确认零残留）：
+- `cli_client.py` `subprocess.run`（阻塞）→ 由 `_run_*_cli` 同步助手封装 → 全部调用点 `await asyncio.to_thread(...)` 在工作线程执行 ✅
+- `lark_api_repository.py` `_export_document` 内 `time.sleep(0.5)` 轮询（阻塞）→ 由 `get_document_as_pdf/docx` 调用 → tools.py 两个 async 工具以 `await asyncio.to_thread(...)` 包裹 ✅
+- `tools.py:266/1316` 直接 `return cli_client.run_command(...)` 均位于 `_run_*_cli` 同步助手内部（`_` 前缀、无 async），由上层 to_thread 驱动，非事件循环路径 ✅
+- monkey-patch / 回调劫持 / patch 模式全仓扫描：零残留 ✅
+
+**第三遍审计净效果**：新增 `ReflectAndRetryModelPlugin` 接入（deploy.py plugins 列表 2 项）+ 测试补 2 项断言（94 全绿）。线上生效随下次 `bash deploy.sh`。

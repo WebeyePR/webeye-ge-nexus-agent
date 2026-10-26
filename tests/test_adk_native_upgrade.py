@@ -159,8 +159,20 @@ class TestResidualsEradicated:
         ), "旧项目名 wheel 残留未根除"
 
     def test_deploy_module_has_audit_plugin(self):
-        """deploy.py 的 app 构造必须携带审计插件。"""
+        """deploy.py 的 app 构造必须携带审计插件与模型自愈重试插件。"""
 
         src = open("nexus_agent/deployement/deploy.py").read()
-        assert "plugins=[ToolAuditPlugin()]" in src
+        assert "ToolAuditPlugin()" in src
+        assert "ReflectAndRetryModelPlugin()" in src, "模型瞬时故障自愈重试插件不得缺失"
+        assert "from google.adk.plugins import ReflectAndRetryModelPlugin" in src
         assert "if __name__ == \"__main__\":" in src, "部署 main 守卫不得回退"
+
+    def test_reflect_retry_model_plugin_defaults(self):
+        """ADK 原生模型自愈重试插件可用且默认 3 次重试。"""
+
+        import inspect
+
+        from google.adk.plugins import ReflectAndRetryModelPlugin
+
+        sig = inspect.signature(ReflectAndRetryModelPlugin.__init__)
+        assert sig.parameters["max_retries"].default == 3
