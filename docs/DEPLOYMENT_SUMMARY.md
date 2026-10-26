@@ -8,10 +8,10 @@
 - **工作目录**：必须在项目根目录执行 `uv build`
 
 ### 2. 依赖检查
-确保 `pyproject.toml` 包含：
-- `google-adk>=1.24.1`
-- `google-cloud-aiplatform>=1.135.0`
-- `requests>=2.31.0`
+确保 `pyproject.toml` 包含（ADK 2.x 升级后全部精确锁定，2026-10-26）：
+- `google-adk==2.13.0`
+- `google-cloud-aiplatform==2.6.0`
+- `google-genai==2.33.0`
 
 ### 3. 构建命令
 ```bash

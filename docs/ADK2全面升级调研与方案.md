@@ -82,12 +82,55 @@
 
 ## 七、验证清单（实施时逐项打勾）
 
-- [ ] 全量 pytest 通过（含多模态新测试：工具返回 `types.Part` 后模型能"看到"图片）
-- [ ] `uv build` wheel 成功且包含全部模块
-- [ ] 真实部署成功，REST 实查实例规格仍生效（min_instances/concurrency/resource_limits）
-- [ ] GE 原样调用（`:streamQuery`）实测 partial 事件仍正常（注意解析层级：事件嵌套于 `{"events": [...]}`）
-- [ ] GE 界面实测：流式渲染、图片问答、文档写入三线
+> **✅ 已于 2026-10-26 按"方案 A"完成实施，结果如下（第八节）。**
+
+- [x] 全量 pytest 通过（**83 passed 零回归**，含多模态原生机制 4 项 + 流式对齐 5 项新测试）
+- [x] `uv build` wheel 成功且包含全部模块（并根除了 stale `build/` 目录导致的旧 `callbacks.py` 残留）
+- [x] 真实部署成功（4m1s），REST 实查实例规格生效：minInstances=1 / containerConcurrency=36 / cpu4·mem8Gi
+- [x] GE 原样调用（`:streamQuery`）实测：**6 个 partial 增量 + 1 个最终事件**，SSE 流式在 ADK 2.13 下正常（解析层级注意事项已验证有效）
+- [x] 工具调用链路实测：`discover_lark_operations` 真实执行并返回正确结果（ADK 2.13 工具循环无回归）
+- [ ] GE 界面实测：流式渲染、图片问答、文档写入三线（需人工在 GE 界面确认，自动化无法覆盖）
 - [ ] 长会话/多轮会话语义正常（session 获取/回退逻辑）
+
+## 八、实施结果（2026-10-26 完成）
+
+### 8.1 版本落点（全部精确锁定）
+
+| 包 | 升级前 | 升级后 | 说明 |
+|---|---|---|---|
+| google-adk | 1.24.1 | **2.13.0** | ADK 2.x 大版本 |
+| google-cloud-aiplatform | 1.136.0 | **2.6.0** | genai 约束交集的必选组合 |
+| google-genai | 1.62.0 | **2.33.0** | adk 2.13 要求 >=2.30,<3 |
+| langchain-google-vertexai | 3.2.2 | 3.2.5 | 同步升级 |
+| langgraph | 1.0.7 | 1.2.17 | 满足 adk 2.13 的 >=1.0.10 |
+| cloudpickle | 3.1.2 | 3.1.2（不变） | 官方最佳实践锁定项 |
+
+### 8.2 代码迁移结果
+
+| 迁移项 | 结果 |
+|---|---|
+| `callbacks.py` 多模态 monkey-patch | **整体删除**（目标函数在 2.13 已被移除；框架原生 `_extract_multimodal_parts` 接管） |
+| `tools.py` 三处工具 | 改返回原生 `types.Part(inline_data=...)`，JSON response 保持可序列化 |
+| `agent.py` mode hack | 移除（2.13 真 pydantic 字段 `mode: LlmAgentMode`，实测 root_agent 正常加载） |
+| `streaming_app.py` | 对齐 2.6.0 模板逐行重写：保留 authorizations→temp: state_delta、labels 透传、`_save_artifacts`；SSE 注入点不变；回滚开关保留 |
+
+### 8.3 真实部署验证
+
+- 新引擎 `projects/839062387451/locations/us-central1/reasoningEngines/3781091020427493376`，GE 注册 state=ENABLED，旧引擎已清理
+- 云端 requirements 与本地锁定一致（adk==2.13.0 / aiplatform==2.6.0 / genai==2.33.0，部署日志确认）
+- 流式：6 partial + 1 final，首个 partial 延迟 6.89s（含模型推理），块间隔 ~100ms
+- 工具循环：`discover_lark_operations` 服务端真实执行，返回正确
+
+### 8.4 Git 提交
+
+- `bfa1d8a` build(deps): 全面升级至 ADK 2.x 并精确锁定版本
+- `7975ff0` refactor(multimodal): 迁移至 ADK 2.x 原生多模态，删除 monkey-patch
+- `2bb0c68` feat(streaming): StreamingAdkApp 对齐 aiplatform 2.6.0 模板重写
+- `（本次提交）` docs: 实施结果回填
+
+### 8.5 回滚
+
+单 commit 粒度回滚代码 + `.deploy_env` 指向旧 RE 即可切回；或运行期设置 `AGENT_ENABLE_SSE_STREAMING=0` 仅关闭流式。
 
 ## 引用来源
 

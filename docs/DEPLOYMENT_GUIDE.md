@@ -26,14 +26,24 @@ STAGING_BUCKET = "gs://adk-agent-deploy"   # GCS 存储桶（必须存在）
 
 ### 2. 依赖检查
 
-确保 `pyproject.toml` 包含所有必要的依赖：
+确保 `pyproject.toml` 包含所有必要的依赖（ADK 2.x 升级后全部精确锁定，2026-10-26）：
 ```toml
 dependencies = [
-    "google-adk>=1.24.1",
-    "google-cloud-aiplatform>=1.135.0",
-    "requests>=2.31.0"
+    "google-adk==2.13.0",
+    "google-cloud-aiplatform==2.6.0",
+    "google-genai==2.33.0",
+    "cloudpickle==3.1.2",
+    # ... 其余见 pyproject.toml（单一事实源）
 ]
 ```
+
+部署时以项目 wheel 为安装入口。也就是说：
+
+- 依赖应只维护在 `pyproject.toml`
+- `deploy.py` 不应再维护一份手写依赖列表
+- 项目 wheel 的 `METADATA` 由 `pyproject.toml` 生成，远端通过安装 wheel 获取 `lark_agent` 包和第三方依赖
+- `requirements.txt` 中只能使用 wheel 文件名，不能写入本地绝对路径
+- 这样可以避免本地依赖与云端运行时依赖漂移
 
 ### 3. Python 版本要求
 
@@ -58,8 +68,8 @@ uv build --wheel --out-dir lark_agent/deployement
 # 创建并启用虚拟环境
 uv sync && source .venv/bin/activate
 
-# 安装部署所需的依赖
-pip install google-cloud-aiplatform>=1.135.0 python-dotenv google-adk>=1.24.1
+# 安装部署所需的依赖（版本以 pyproject.toml 锁定为准，勿手写旧版本）
+uv sync
 ```
 
 ### 步骤 3: 执行部署
@@ -67,6 +77,8 @@ pip install google-cloud-aiplatform>=1.135.0 python-dotenv google-adk>=1.24.1
 ```bash
 cd /Users/apple/IdeaProjects/adk-agents
 export PYTHONPATH=$(pwd)
+# 可选：如果 Agent Engine 构建较慢，可把等待超时从默认 900 秒调大
+export AGENT_ENGINE_CREATE_TIMEOUT_SECONDS=3600
 cd lark_agent/deployement
 python3 deploy.py
 ```
@@ -78,6 +90,56 @@ Resource Name: projects/<PROJECT_ID>/locations/<LOCATION>/reasoningEngines/<ENGI
 ```
 
 **请保存这个 Resource Name**，后续注册时需要用到。
+
+### 关于 900 秒超时
+
+Vertex AI Python SDK 在等待 Agent Engine 长任务完成时，默认轮询超时为 900 秒。对于依赖较多或构建较慢的 Agent，这个等待窗口可能不够，表现为：
+
+```text
+TimeoutError: Operation did not complete within the designated timeout of 900 seconds.
+```
+
+这不一定代表远端构建失败，也可能只是本地等待超时。
+
+当前项目已支持通过环境变量调整等待时间：
+
+```bash
+export AGENT_ENGINE_CREATE_TIMEOUT_SECONDS=3600
+```
+
+如果再次出现超时，请优先检查：
+
+- Vertex AI Agent Engine 控制台
+- Cloud Logging 中对应的构建日志
+- 是否已经生成新的 Reasoning Engine 资源
+
+### 关于 GCS 上传 `dependencies.tar.gz` 超时
+
+如果日志卡在：
+
+```text
+Writing to gs://.../dependencies.tar.gz
+```
+
+随后抛出：
+
+```text
+google.api_core.exceptions.RetryError: Timeout of 120.0s exceeded
+```
+
+说明问题发生在将 `extra_packages` 打包后的大文件上传到 GCS，而不是 Agent Engine 构建或启动本身。
+
+当前项目的部署脚本已经对以下两层做了补丁：
+
+- `Blob.upload_from_string(..., timeout=600)`
+- `Blob.upload_from_file(..., timeout=600)`
+- `DEFAULT_RETRY.with_timeout(600)`
+
+如果网络仍不稳定，可考虑：
+
+- 减少 `extra_packages` 体积
+- 避免把不必要的大文件打进 wheel
+- 在更稳定的网络环境下重新执行 `bash deploy.sh`
 
 ---
 
@@ -151,4 +213,3 @@ access_token = tool_context.state.get(f"{LARK_AUTH_ID}")
 ```
 
 Gemini Enterprise 会自动管理 OAuth 流程，将 token 存储到 `tool_context.state` 中。
-
