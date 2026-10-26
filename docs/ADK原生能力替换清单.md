@@ -171,3 +171,73 @@
 | 5 | registry 结构（lark/gws commands.json + 薄 registry.py） | ✅ 数据驱动 + 运行时 discover 兜底，无陈旧硬编码 |
 
 **第七遍净效果**：新增 F5 验证项（require_confirmation 候选），代码零改动。七遍累计，新维度已穷尽。
+
+## 十、第八遍审计（2026-10-27 00:09 补充）——ADK 全模块面程序化枚举
+
+方法升级：不再抽查，`pkgutil.walk_packages` 枚举本机 ADK 2.13 全部 113 个子模块 → 聚合 32 个能力域 → 与前七遍评估矩阵做全量 diff → 从未评估域逐个源码探针。
+
+| 能力域 | 状态 | 裁决 |
+|---|---|---|
+| agents/tools/plugins/apps/runners/events/flows/models | 前七遍已覆盖 | 部分使用（Agent/工具/双插件/App） |
+| a2a / evaluation / workflow / live / integrations / skills / labs / code_executors / planners / memory / auth / telemetry / cli | 前七遍已定性 | 不适用/不采/已禁用防挂起 |
+| **optimization（GEPA 提示词优化器）** | 新评估 | ❌ 离线编辑工序非运行时能力 |
+| **code_executors（沙箱代码执行）** | 新评估 | ❌ 无计算类工具需求 |
+| **labs（antigravity/classifiers/openai 实验模型）** | 新评估 | ❌ 实验性、非 Vertex 主链路 |
+| **App 级 ContextCacheConfig** | **新评估 → ✅ 采纳** | App 级上下文缓存：instruction ~5k tokens + 36 工具 schema 超过 Gemini 3 的 4096 门槛；跨轮复用前缀显著降本提速；官方失败优雅降级；`AGENT_ENABLE_CONTEXT_CACHE=0` 可回退。实施：deploy.py 预构建 `App(name, root_agent, plugins, context_cache_config=ContextCacheConfig(min_tokens=4096))` 传入 StreamingAdkApp（AdkApp 校验规则：app/agent/app_name/plugins 四者互斥，插件必须挂 App） |
+| App 级 EventsCompactionConfig（LLM 摘要压缩长会话） | 新评估 | ❌ 暂不采：额外 LLM 成本 + GE 事件流渲染兼容风险；配合上下文缓存后长会话压力已缓解；列为长期候选 |
+| App 级 ResumabilityConfig（长任务暂停/恢复） | 新评估 | ❌ 暂不采：at-least-once 语义要求工具幂等，LRFT 轮询窗口 ~10s 无暂停需求 |
+
+**验证**：端到端实例化（min_tokens=4096 + 双插件挂 App + StreamingAdkApp 正常）、95 测试全绿（新增 2 断言）、`AGENT_ENABLE_CONTEXT_CACHE=0` 回退路径保留。
+
+## 十一、第九遍审计（2026-10-27 00:17 补充）——LlmAgent 字段 × tools 域 91 类全量 diff
+
+枚举收官的最后两块面：Agent 全部 33 个模型字段、tools 域全部 91 个公开类，逐个 diff 裁决。
+
+**LlmAgent 33 字段裁决**（项目使用：name/description/model/tools）：
+| 字段 | 裁决 |
+|---|---|
+| **static_instruction** | **✅ 采纳**：ADK 2.13 缓存优化官方组合——静态前缀直发 system_instruction 开头（免每轮状态解析），动态 instruction 落 user content；与已接入的 App 级 ContextCacheConfig 配套（源码明言）。项目指令为无占位符纯静态文本，完美契合；已迁移（14.2k 字符），动态 instruction 置空 |
+| retry_config/timeout | ReflectAndRetryModelPlugin 已覆盖模型重试；默认超时即可 |
+| before/after_model/tool_callback、on_*_error_callback | 已由插件集中化替代（分散回调是反向模式） |
+| planner/code_executor/include_contents/output_key/state_schema/output_schema/sub_agents/mode/parallel_worker/disallow_transfer_*/rerun_on_resume/wait_for_output/global_instruction(已废弃) | 均不适用（单 Agent、无编排/代码执行/结构化输出诉求） |
+
+**tools 域 91 类裁决**（项目使用：纯函数自动包装 + LongRunningFunctionTool）：
+- 地面搜索类（GoogleSearch/EnterpriseWebSearch/VertexAiSearch/GoogleMaps/UrlContext）：企业操作 Agent 无搜索地面需求 ❌
+- 工具集类（OpenAPIToolset/RestApiTool/BigQuery/ApplicationIntegration/APIHub/Toolbox/MCP）：CLI 总线 + discover/spec/schema 三步法已是既定架构且带审计/干跑层，OpenAPI 自动生成不采 ❌
+- 记忆类（LoadMemory/PreloadMemory）：无记忆服务诉求 ❌
+- 认证类（AuthenticatedFunctionTool/GoogleTool）：GE auth 注入体系已在位，重接高风险零收益 ❌
+- SetModelResponse/ModelConsult/Bash/Environment/Skill 生命周期：均已定性 ❌
+- **ToolConfirmation**：与 F5 候选 require_confirmation 配套，随 F5 一起验证 ⏸
+
+**验证**：95 测试全绿、Agent 构造正确（static_instruction 14231 字符 / instruction 空）。
+
+## 十二、第十遍审计（2026-10-27 00:19 补充）——运行时行为验证收官
+
+枚举面已三层穷尽（113 模块/32 域 → 33 Agent 字段 → 91 tools 类），本轮验证最后维度：**最近两次结构变更后的真实运行时行为**。
+
+| 项 | 结果 |
+|---|---|
+| 本地端到端冒烟（api 服务 → SSE → 工具 → 最终回复） | ✅ 全过：30 partial 流式事件、24 次工具调用、最终回复正确且符合指令行为（三步法 discover → 中文优雅回答） |
+| static_instruction 迁移后的模型行为 | ✅ 指令遵循无回归——静态前缀直发路径在真实请求链路上生效 |
+| 上下文缓存路径 | 无异常（第一轮无缓存为官方设计；第二轮起生效，线上 GE 验证时观察） |
+
+**十遍审计正式收官**：所有维度（原生替换/依赖/插件/部署/死代码/指令一致性/硬确认候选/模块枚举/字段与工具类枚举/运行时行为）均已覆盖，无剩余未审视项。
+
+## 十三、第十一遍审计（2026-10-27 00:23 补充）——联网核对最新版本 + 2.11–2.13 changelog 全读
+
+用户点名"联网+源码"：PyPI JSON API 实证 + GitHub Releases 全文抓取。
+
+**版本核对**：PyPI `info.version = 2.13.0` = 本项目锁定版本 = **最新版，无需升级**（本地 site-packages 源码即 PyPI 2.13.0 源码，历轮探针读的即官方源码）。
+
+**2.11–2.13 changelog 与项目对齐裁决**：
+| 版本 | 要点 | 对本项目 |
+|---|---|---|
+| 2.13.0 | 字符串模型 agent 执行回合最高提速 8 倍、事件加载开销降低 | ✅ **自动生效**（本项目 model 即字符串） |
+| 2.13.0 | 12 个实验特性转 stable；ForceEscalationPlugin；classifiers | 无需动作 |
+| 2.13.0 | ⚠️ Breaking：遥测切 OpenTelemetry GenAI v2 | 无影响（enable_tracing=False + telemetry disable 已隔离） |
+| 2.12.0 | 长会话首次模型请求时间缩短 40% | ✅ 自动生效 |
+| 2.12.0 | after_tool_callback、workflow require_confirmation、专用 SA 部署 | 审计已走插件；确认机制=F5 候选；部署参数已在位 |
+| 2.11.0 | /run_sse 客户端断连自动取消（abort_signal） | ✅ 自动生效（SSE 断连不残留运行） |
+| 2.11.0 | ToolCallIntegrityPlugin、ModelConsultTool、SQLite memory | 已在第三/七遍有据不采 |
+
+**结论**：2.11–2.13 三版的性能红利（8 倍回合提速、40% 首请求、断连自取消）因锁定最新版**全部自动享受**；无新增可采纳项；breaking change 已隔离。联网+源码核对闭环。
