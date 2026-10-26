@@ -110,3 +110,64 @@
 - monkey-patch / 回调劫持 / patch 模式全仓扫描：零残留 ✅
 
 **第三遍审计净效果**：新增 `ReflectAndRetryModelPlugin` 接入（deploy.py plugins 列表 2 项）+ 测试补 2 项断言（94 全绿）。线上生效随下次 `bash deploy.sh`。
+
+## 六、第四遍审计（2026-10-26 23:56 补充）——新维度核验
+
+| # | 核验维度 | 结论 |
+|---|------|------|
+| 1 | `agent.py` 全文逐行 | ✅ 已完全原生对齐：无手写 generate_content_config/planner/mode hack；多模态走 2.x 原生 FunctionResponse.parts；mode 说明注释在案。36 工具平铺列表即 ADK 原生推荐形态 |
+| 2 | `config/` 目录引用链 | ✅ 非死目录：tools.py 与 lark_api_repository.py 均引用（首次 shell grep 管道误报为空，专用工具复核推翻） |
+| 3 | `streaming_app.py` | ✅ 保留：GE :streamQuery 链路 SSE 注入为 aiplatform 模板层能力，ADK 不提供原生等价物；版本锁定约束与回滚开关文档完备 |
+| 4 | 部署参数（治慢第一层） | ✅ 已在位：min_instances=1（温热防冷启动）、container_concurrency=36、resource_limits 4CPU/8Gi，全部环境变量可调 |
+| 5 | `ReflectAndRetryModelPlugin` 实例化端到端 | ✅ 真实 import deploy.py（main 守卫生效，无误部署）：StreamingAdkApp 成功挂载双插件 |
+
+**第四遍结论**：零新增改动项，全部核验通过；审计收敛（连续两遍仅新增 1 项并已落地，第四遍无发现）。
+
+## 七、第五遍审计（2026-10-26 23:59 补充）——冗余/死代码专项清扫
+
+用户点名清查：不使用的工具函数、旧自定义注册、中间件、字节识别图片等旧时代残留。方法：AST 全量盘点（top-level def/class × 全仓引用矩阵）+ AST Call/Name 精确行级裁决 + 弃用标记全仓扫描。
+
+**已删除（约 250 行，commit fc23591）**：
+
+| # | 死代码 | 位置 | 佐证 |
+|---|------|------|------|
+| 1 | `batch_get_document_urls` | lark_api_repository.py 原 158-241 | 文档串自标 DEPRECATED"新搜索 API 稳定后删除"；生产/测试零引用 |
+| 2 | `get_document_rich_text_by_word` | 原 944-1046 | 被 `_by_block` 全面取代；零引用 |
+| 3 | `_process_image_to_base64` | 原 736-776 | 仅存于 1 行注释；`_to_bytes` 已覆盖 |
+| 4 | `_download_media` | 原 814-831 | 被 `_download_media_by_batch` 取代 |
+| 5 | 孤儿导入 `zipfile`/`base64` | 原 3/6 行 | 死函数专属依赖，删除后成孤儿 |
+
+**用户点名项核验（均已在历次重构中根除，本轮实证零残留）**：
+- 中间件：nexus_agent/ + tests/ 全仓 grep `middleware|Middleware` 零命中
+- 字节识别图片：`imghdr|magic|PNG/JPEG 签名` 全仓零命中（原属已删除的 js_bridge 体系）
+- 自定义重复注册：AST 扫描 tools.py 全部 top-level 函数——36 个注册工具 + 内部助手全部有真实引用，无孤儿工具
+- 模块级常量：全仓零未引用；`__all__` 导出与实际定义一致
+- 弃用标记：`DEPRECATED|已弃用|不再使用` 全仓零命中
+
+**验证**：94 测试全绿、`import nexus_agent` 冒烟 OK、36 工具完整、编译检查通过。
+
+## 八、第六遍审计（2026-10-27 00:04 补充）——指令/工具一致性专项
+
+新维度：system_instruction ↔ 工具注册表一致性、docstring 时效性、双后端分工清晰度。
+
+| # | 发现 | 处置 |
+|---|------|------|
+| 1 | 36 个注册工具中 10 个未在 instruction 出现（含 2 个 LRFT 等待工具、4 个文档编辑工具混用无分工） | instruction 补齐至 **36/36**：明确 feishu_mcp_*（异步任务+等待）为首选、create/update_lark_document（CLI 同步回退）不混用、execute_lark_api/get_access_token/feishu_mcp_fetch_doc/search_google_drive_files/append_google_doc_text/get_google_workspace_operation_schema 各自定位 |
+| 2 | feishu_mcp_create/update_doc 的 docstring 未指引"返回 task_id 后立刻调用 wait_for_* 工具" | 两处 docstring Returns 补 Next step 指引（工具描述随每次调用发送，对模型约束力最强），强调勿手动轮询 |
+| 3 | 幽灵名扫描 | 仅 `lark_doc_xxx_logo`（示例文件名，非工具），无幽灵工具引用 |
+| 4 | create/update_lark_document 与 feishu_mcp_* 关系判定 | **保留**：CLI 同步 vs MCP 异步任务为互补回退，非代码重复；已用 instruction 明确分工消除模型选择混乱 |
+| 5 | 环境变量三方一致性（config/ ↔ deploy.py env_vars ↔ 脚本） | 一致，无需改动 |
+
+**验证**：94 测试全绿、import 冒烟 OK。审计至此六遍，新增维度已穷尽。
+
+## 九、第七遍审计（2026-10-27 00:07 补充）——原生硬确认机制与收尾探针
+
+| # | 维度 | 结论 |
+|---|------|------|
+| 1 | **ADK 2.13 原生 `FunctionTool(func, require_confirmation=bool\|Callable)`**（bin 探针实测存在） | ⏸ **列为 F5 待验证候选，暂不接入**：突变工具当前为 instruction 软约束 + ToolAuditPlugin 审计；框架级硬拦截的前提是 GE 前端支持 ADK 确认事件流（escalation + tool_confirmation 回传），未验证前盲接会导致突变工具卡死等待确认。已写入验证清单 F5：GE 界面最小样例验证通过后，将 delete_lark_document 等高危工具升级为硬拦截 |
+| 2 | ADK 原生 `load_artifacts_tool` | ❌ 非替代关系：原生工具把会话已有 artifacts 注入模型上下文；项目 `render_image_as_artifact` 是"下载 URL→注册 artifact→返回 Part"，职责不同，保留 |
+| 3 | `adk deploy agent_engine` CLI（2.6+ 支持 --extra_packages） | ❌ 保留自研 deploy.py：需精确控制 StreamingAdkApp/plugins/min_instances/concurrency/resource_limits/env_vars，CLI 通道无法等价表达 |
+| 4 | tests/ 陈旧检测（AST 引用完整性） | ✅ 全部测试引用的被测模块均存在，零陈旧 |
+| 5 | registry 结构（lark/gws commands.json + 薄 registry.py） | ✅ 数据驱动 + 运行时 discover 兜底，无陈旧硬编码 |
+
+**第七遍净效果**：新增 F5 验证项（require_confirmation 候选），代码零改动。七遍累计，新维度已穷尽。
