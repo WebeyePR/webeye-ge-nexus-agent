@@ -2004,18 +2004,20 @@ def get_lark_document_content_pdf(
                 MESSAGE_KEY: "Failed to export PDF content (or document is too large). Please try 'get_lark_document_content' for text-only access.",
             }
 
-        # 将 PDF bytes 通过 __multimodal_parts__ 传递给模型视觉通道
-        from .callbacks import MULTIMODAL_PARTS_KEY
+        # ADK 2.x 原生多模态：返回值中的 types.Part(inline_data=...) 会被
+        # ADK 自动提取到 FunctionResponse.parts，让模型真正"看到" PDF
+        from google.genai import types
 
         return {
             "status": "success",
             "text_content": "以下是该文档的 PDF 多模态视图。请直接阅读 PDF 内容回答用户问题。",
             "pdf_size_bytes": len(pdf_bytes),
-            MULTIMODAL_PARTS_KEY: [
-                {
-                    "mime_type": "application/pdf",
-                    "data": pdf_bytes,
-                }
+            "pdf_media": [
+                types.Part(
+                    inline_data=types.Blob(
+                        data=pdf_bytes, mime_type="application/pdf"
+                    )
+                )
             ],
         }
     except Exception as e:
@@ -2076,18 +2078,21 @@ def get_lark_document_content_docx(
                 MESSAGE_KEY: "Failed to export Word content (or document is too large).",
             }
 
-        # 将 Word bytes 通过 __multimodal_parts__ 传递给模型
-        from .callbacks import MULTIMODAL_PARTS_KEY
+        # ADK 2.x 原生多模态：返回值中的 types.Part(inline_data=...) 会被
+        # ADK 自动提取到 FunctionResponse.parts，让模型真正"看到" Word
+        from google.genai import types
 
         return {
             "status": "success",
             "text_content": "以下是该文档的 Word (docx) 多模态数据。请分析其内容回答用户问题。",
             "docx_size_bytes": len(docx_bytes),
-            MULTIMODAL_PARTS_KEY: [
-                {
-                    "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    "data": docx_bytes,
-                }
+            "docx_media": [
+                types.Part(
+                    inline_data=types.Blob(
+                        data=docx_bytes,
+                        mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                )
             ],
         }
     except Exception as e:
@@ -2144,6 +2149,10 @@ async def get_lark_document_rich_content(
 
         repo_parts = result.get("parts", [])
         text_segments = []  # 文本内容
+        # ADK 2.x 原生多模态：收集 types.Part，随返回值交给 ADK 自动提取
+        # 到 FunctionResponse.parts（见 _caller._extract_multimodal_parts）
+        from google.genai import types as genai_types
+
         multimodal_parts = []  # 多媒体数据（图片/PDF），将通过 FunctionResponse.parts 传递
 
         for item in repo_parts:
@@ -2162,17 +2171,13 @@ async def get_lark_document_rich_content(
                     mime = item.get("mime_type", "image/jpeg")
 
                     if img_data:
-                        # 将图片数据收集到 multimodal_parts（通过 __multimodal_parts__ 传递）
+                        # 收集为原生 types.Part（ADK 2.x 自动提取到视觉通道）
                         multimodal_parts.append(
-                            {
-                                "mime_type": mime,
-                                "data": img_data,
-                            }
+                            genai_types.Part.from_bytes(data=img_data, mime_type=mime)
                         )
-                        # 🌟 新增：直接注册为原生 ADK Artifact，确保用户前端 100% 渲染展示
+                        # 🌟 直接注册为原生 ADK Artifact，确保用户前端 100% 渲染展示
                         try:
-                            from google.genai import types
-                            artifact_part = types.Part.from_bytes(data=img_data, mime_type=mime)
+                            artifact_part = genai_types.Part.from_bytes(data=img_data, mime_type=mime)
                             # 清洗文件名
                             safe_img_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', img_name)
                             ext_map = {
@@ -2215,10 +2220,8 @@ async def get_lark_document_rich_content(
 
         # 构造返回值：
         # - text_content: 合并后的文本，放入 FunctionResponse.response dict
-        # - __multimodal_parts__: 图片数据，被 patch 后的 ADK 提取
+        # - media: 原生 types.Part 列表，ADK 2.x 自动提取
         #   到 FunctionResponse.parts 中，让模型真正"看到"
-        from .callbacks import MULTIMODAL_PARTS_KEY
-
         response = {
             "status": "success",
             "text_content": "\n".join(text_segments),
@@ -2227,7 +2230,7 @@ async def get_lark_document_rich_content(
         }
 
         if multimodal_parts:
-            response[MULTIMODAL_PARTS_KEY] = multimodal_parts
+            response["media"] = multimodal_parts
             logger.info(
                 f"[get_lark_document_rich_content] 返回 {len(multimodal_parts)} 张图片 "
                 f"(通过 FunctionResponse.parts 视觉通道)"

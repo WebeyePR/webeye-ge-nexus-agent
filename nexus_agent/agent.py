@@ -41,12 +41,8 @@ from .tools import (
     render_image_as_artifact,
 )
 
-# 激活 ADK 多模态扩展：让工具能通过 FunctionResponse.parts 传递图片/PDF
-try:
-    from .callbacks import patch_adk_for_multimodal
-    patch_adk_for_multimodal()
-except Exception as e:
-    print(f"Warning: Failed to patch ADK for multimodal: {e}")
+# ADK 2.x 说明：多模态已由框架原生支持（工具返回 types.Part 即可，
+# 框架自动提取到 FunctionResponse.parts），无需任何 patch。
 
 
 if os.getenv("LOCATION", "global") == "global":
@@ -216,9 +212,6 @@ root_agent = Agent(
     ],
 )
 
-# 兼容性修复：为 google-adk 新版本添加 mode 属性
-try:
-    if not hasattr(root_agent, "mode"):
-        root_agent.mode = os.getenv("MODEL_NAME", "gemini-3-flash-preview")
-except Exception:
-    pass
+# ADK 2.x 说明：旧版"mode 兼容 hack"已删除。ADK 2.13 的 LlmAgent
+# 拥有真 pydantic 字段 mode: LlmAgentMode（BASE/RESEARCH/...，控制执行模式），
+# 再向其赋模型名字符串会触发校验失败，模型名一律经由 model= 参数传入。
