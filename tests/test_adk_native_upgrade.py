@@ -191,7 +191,8 @@ class TestResidualsEradicated:
     def test_deploy_module_has_audit_plugin(self):
         """deploy.py 的 app 构造必须携带审计插件与模型自愈重试插件。"""
 
-        src = open("nexus_agent/deployment/deploy.py").read()
+        with open("nexus_agent/deployment/deploy.py") as f:
+            src = f.read()
         assert "ToolAuditPlugin()" in src
         assert "ReflectAndRetryModelPlugin()" in src, "模型瞬时故障自愈重试插件不得缺失"
         assert "from google.adk.plugins import ReflectAndRetryModelPlugin" in src

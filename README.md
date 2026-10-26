@@ -6,9 +6,10 @@
 
 *   **文档智能搜索**: 支持通过自然语言关键词搜索飞书云文档，并以 Markdown 超链接形式展示结果。
 *   **文档内容问答**: 支持读取飞书文档内容，包含 Markdown 文本与多模态图片内容，并基于文档内容回答问题。
-*   **AI 输出写入文档**: 支持将 Agent 生成的 Markdown 内容写入新的飞书云文档，或追加、覆盖更新已有文档，并返回文档链接、任务状态或更新结果。
-*   **飞书生态操作扩展**: 内置 `lark-cli` 二进制，可通过 CLI 封装或通用 OpenAPI 工具扩展 Drive、Wiki、Base、Sheets、Calendar、Task、IM 等飞书能力。
-*   **Google Workspace 深度整合**: 内置 `gws` 二进制工具，支持通过 Gemini Enterprise OAuth2 注入的用户态凭证无缝调用 Google APIs（如 Google Calendar、Google Sheets 等），支持日程管理、表格读写与跨生态办公联动。
+*   **AI 输出写入文档**: 支持将 Agent 生成的 Markdown 内容写入新的飞书云文档，或追加、覆盖更新已有文档，并返回文档链接、任务状态或更新结果；同时支持通过 Markdown → HTML 高保真管线创建/追加 Google Docs（自动格式转换，私有鉴权图片自动替换为安全隔离卡片）。
+*   **飞书生态操作扩展**: 内置 `lark-cli` 二进制与 308 条命令注册表（覆盖 19 个服务域），通过 CLI 封装或通用 OpenAPI 工具扩展 Drive、Wiki、Base、Sheets、Calendar、Task、IM、Mail 等飞书能力。
+*   **Google Workspace 深度整合**: 内置 `gws` 二进制工具与 33 条命令注册表（覆盖 14 个服务域），支持通过 Gemini Enterprise OAuth2 注入的用户态凭证无缝调用 Google APIs——覆盖 Google Docs（创建/追加写入）、Google Sheets（读写）、Google Calendar（日程查询/创建）、Gmail、Slides、Tasks 等，实现跨生态办公联动。
+*   **命令自省与模糊匹配**: 随包发布 `commands.json` 命令元数据注册表，Agent 通过 `discover → get_spec → execute` 三步法自动发现并调用平台长尾命令，配合分词模糊匹配与 argv 逆向突变判定，无需逐个人工封装。
 *   **双生态 OAuth 安全认证**: 完美继承 Gemini Enterprise 的安全授权机制，支持飞书与 Google Workspace 双重 OAuth 认证流程。当检测到用户未授权时，会自动引导用户登录授权，确保企业数据安全合规。
 *   **高抗震防灾设计 (Anti-Crash)**: 引入了工业级全局防御与异常拦截机制（Phase VII），全方位隔离因临期凭证、第三方 API 抖动、并发或极端入参导致的异常，以卓越的弹性降级与入参类型守卫，杜绝模型运行时崩溃，实现全年无休高可用。
 
@@ -26,7 +27,7 @@
     *   `agent.py`: 定义 `LlmAgent` 的角色、Prompt 和工具集。
     *   `tools.py`: 定义供 Agent 调用的工具函数，负责参数校验、授权读取、结果归一化和业务级封装。
     *   `callbacks.py`: 处理多模态响应兼容性等运行时补丁。
-    *   `lark_registry/commands.json` & `gws_registry/commands.json`: 平台命令元数据注册表，驱动二进制的自省和模糊匹配。
+    *   `lark_registry/commands.json` & `gws_registry/commands.json`: 平台命令元数据注册表（308 条飞书命令 / 19 个服务域 + 33 条 GWS 命令 / 14 个服务域），驱动二进制的自省和分词模糊匹配，支撑 `discover → get_spec → execute` 三步通用调用。
     *   `infrastructure/lark_api_repository.py`: 封装飞书 OpenAPI、文档读取和飞书 MCP 网关调用。
     *   `infrastructure/cli_client.py`: 统一封装随包发布的 `lark-cli` 与 `gws` 二进制工具，使用隔离 `HOME` 和环境变量，在安全沙箱中惰性传递并应用用户态 OAuth 凭证。
 
@@ -82,7 +83,7 @@ sequenceDiagram
 
 ## ⚙️ 配置 (.env)
 
-在本地运行或部署前，请在项目根目录创建 `.env` 文件，并修改必填配置（参考如下示例）：
+在本地运行或部署前，请在项目根目录创建 `.env` 文件，并修改必填配置（参考如下示例；`scripts/init.sh` 会自动从 `.env.example` 创建包含全部变量的 `.env`）：
 
 ```env
 # --- 飞书 (Lark) 集成配置 ---
@@ -92,6 +93,12 @@ LARK_AUTH_ID="your-unique-auth-id"  # 如 lark-agent-oauth-id
 LARK_CLIENT_ID="your-lark-app-id"
 # （必填参数）飞书开放平台应用 App Secret
 LARK_CLIENT_SECRET="your-lark-app-secret"
+# 飞书开放平台域名（Lark 国际版用户改为 https://open.larksuite.com）
+LARK_DOMAIN="https://open.feishu.cn"
+# 飞书 OAuth 授权 URI（scope 需与上方权限清单一致，可用 scripts/generate_auth_link.py 生成）
+LARK_AUTHORIZATION_URI="https://accounts.feishu.cn/open-apis/authen/v1/authorize?client_id=<App ID>&response_type=code&scope=<权限列表，见 .env.example>"
+# 飞书 OAuth 令牌 URI
+LARK_TOKEN_URI="https://open.feishu.cn/open-apis/authen/v2/oauth/token"
 
 # --- Google Workspace 集成配置 ---
 # （选填）注册 Google Workspace OAuth 到 Gemini Enterprise 时设置的 auth_id；必须对每个 Agent 唯一
@@ -101,6 +108,9 @@ GOOGLE_WORKSPACE_CLIENT_ID="your-google-workspace-client-id"
 GOOGLE_WORKSPACE_CLIENT_SECRET="your-google-workspace-client-secret"
 # （选填）gws helper 需要 GCP project 时使用；默认可复用 PROJECT_ID
 GOOGLE_WORKSPACE_PROJECT_ID=""
+# （选填）Google Workspace OAuth 授权/令牌 URI
+GOOGLE_WORKSPACE_AUTHORIZATION_URI="https://accounts.google.com/o/oauth2/v2/auth?response_type=code&access_type=offline&prompt=consent"
+GOOGLE_WORKSPACE_TOKEN_URI="https://oauth2.googleapis.com/token"
 
 # --- Google Cloud Platform (Vertex AI) 配置 ---
 # （必填参数）GCP 项目 ID (Vertex AI 调用及部署时需要)
@@ -127,9 +137,10 @@ GE_APP_ID="your-ge-app-id"  # 如 webeye-app_1742521319182
 GE_APP_LOCATION="global"
 
 # --- 本地运行配置 ---
-# （选填）是否使用 Vertex AI (1) 或 Google AI Studio (0)
-GOOGLE_GENAI_USE_VERTEXAI=0
-# （选填）Google API Key (仅在 GOOGLE_GENAI_USE_VERTEXAI=0 时需要)
+# （选填）是否使用 Vertex AI/Enterprise 模式 (1) 或 Google AI Studio (0)。
+# 注：ADK 2.13 起旧变量 GOOGLE_GENAI_USE_VERTEXAI 已弃用，统一使用新变量。
+GOOGLE_GENAI_USE_ENTERPRISE=0
+# （选填）Google API Key (仅在 GOOGLE_GENAI_USE_ENTERPRISE=0 时需要)
 GOOGLE_API_KEY="your-api-key"
 ```
 
@@ -152,33 +163,38 @@ GOOGLE_API_KEY="your-api-key"
 2. 在应用管理页面，点击添加应用能力，找到机器人卡片，点击 +添加。
     ![img.png](docs/imgs/img.png)
 
-3. 为应用开启如下权限
+3. 为应用开启如下权限（与 `scripts/lark_scopes.json` 保持一致，该文件为权限唯一定义源，新增能力时请同步更新）：
     ```json
     {
       "scopes": {
-        "tenant": [
+        "tenant": [],
+        "user": [
+          "offline_access",
           "bitable:app",
-          "docs:document:import",
           "docx:document",
+          "docs:document:import",
+          "docs:document.content:read",
+          "docs:document:export",
+          "docs:permission.setting:read",
+          "docx:document:readonly",
+          "docs:document.media:download",
           "drive:drive",
           "drive:drive.metadata:readonly",
           "drive:drive.search:readonly",
           "drive:drive:readonly",
           "wiki:wiki",
-          "wiki:wiki:readonly"
-        ],
-        "user": [
-          "docs:document.content:read",
-          "docs:document.media:download",
-          "docs:document:export",
-          "docx:document.media:download",
-          "docs:permission.setting:read",
-          "docx:document",
-          "docx:document:readonly",
+          "wiki:wiki:readonly",
           "drive:export:readonly",
-          "offline_access",
-          "search:docs:read"
-        ] 
+          "search:docs:read",
+          "calendar:calendar",
+          "calendar:calendar:readonly",
+          "calendar:calendar.event:create",
+          "calendar:calendar.event:read",
+          "calendar:calendar.event:update",
+          "im:chat",
+          "im:message",
+          "im:message.group_msg"
+        ]
       }
     }
     ```
@@ -265,7 +281,7 @@ uv run adk web
     uv sync
     ```
 *   **代码风格**: 遵循 Python 标准代码风格.
-*   **自动化测试**: 拥有覆盖核心工具、API 仓储、多模态回调及防崩溃安全守卫的完整测试套件。目前全量 **75 项单元测试 100% 绿旗通过**，有力地保障了在进行底层加固与扩展时的零回归、零崩溃：
+*   **自动化测试**: 拥有覆盖核心工具、API 仓储、多模态回调及防崩溃安全守卫的完整测试套件。目前全量 **76 项单元测试 100% 绿旗通过**，有力地保障了在进行底层加固与扩展时的零回归、零崩溃：
     ```bash
     .venv/bin/pytest -v
     ```

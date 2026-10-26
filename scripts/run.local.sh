@@ -39,7 +39,9 @@ source "$L_SCRIPT_DIR/load_env.sh"
 
 # 2. 与生产对齐：默认走 Vertex AI（可用 LOCAL_USE_VERTEX=0 关闭，退回 .env 配置）
 if [ "${LOCAL_USE_VERTEX:-1}" = "1" ]; then
-  export GOOGLE_GENAI_USE_VERTEXAI=1
+  # ADK 2.13 起 GOOGLE_GENAI_USE_VERTEXAI 已弃用（每次触发 DeprecationWarning），
+  # 统一使用官方新变量 GOOGLE_GENAI_USE_ENTERPRISE（语义相同：走 Vertex AI 凭证）
+  export GOOGLE_GENAI_USE_ENTERPRISE=1
   export GOOGLE_CLOUD_PROJECT="${GOOGLE_CLOUD_PROJECT:-$PROJECT_ID}"
   export GOOGLE_CLOUD_LOCATION=global
   # Vertex 模式下清掉 AI Studio Key，避免 genai client 优先选到 API Key 通道

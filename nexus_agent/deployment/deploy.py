@@ -220,6 +220,11 @@ def _run_deploy() -> None:
                 "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": os.getenv(
                     "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY", "false"
                 ),
+                # ADK 2.13 模型通道判定（旧 GOOGLE_GENAI_USE_VERTEXAI 已弃用）：
+                # 生产为 Vertex AI/Enterprise 模式，显式声明避免歧义
+                "GOOGLE_GENAI_USE_ENTERPRISE": os.getenv(
+                    "GOOGLE_GENAI_USE_ENTERPRISE", "1"
+                ),
             },
         )
     except FuturesTimeoutError:
