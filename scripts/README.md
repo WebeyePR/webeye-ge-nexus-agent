@@ -2,6 +2,32 @@
 
 本目录包含用于管理和部署 Lark Document Agent 的脚本工具。
 
+## 🚀 本地运行与测试（ADK 官方 CLI）
+
+ADK（google-adk 2.13 自带 CLI）原生支持本地真实运行，无需部署到云端：
+
+### `run.local.sh` — 本地启动
+```bash
+./scripts/run.local.sh          # 默认 adk web：Dev UI 浏览器调试（http://127.0.0.1:8000/dev-ui/）
+./scripts/run.local.sh api      # 纯 API 服务（可 curl 顶层 /run_sse 验证流式）
+./scripts/run.local.sh run      # 终端 CLI 交互模式
+PORT=8080 ./scripts/run.local.sh web   # 自定义端口
+```
+
+- 默认强制 **Vertex AI**（与 Gemini Enterprise 线上行为对齐），走本机 ADC 凭证
+  （首次需 `gcloud auth application-default login`）；`LOCAL_USE_VERTEX=0` 可退回 .env 的 AI Studio Key
+- `adk web / api_server` 端点无鉴权，仅限本地开发调试，勿暴露公网
+
+### `test.local.sh` — 一键端到端冒烟测试
+```bash
+./scripts/test.local.sh
+```
+自动完成：起 api 服务 → 创建会话 → SSE 流式请求 → 触发工具调用（discover_lark_operations）→
+校验 partial 流式事件 / 工具调用 / 最终回复三项全绿后退出。
+注：ADK 2.13 的运行端点为顶层 `/run` 与 `/run_sse`（无 `/apps/{app}` 前缀）。
+
+---
+
 ## 📋 脚本列表
 
 ### 1. `check_agent_status.sh`
