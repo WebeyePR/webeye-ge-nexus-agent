@@ -2250,9 +2250,10 @@ async def create_lark_document(
         if not access_token:
             return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "Authentication required."}
 
-        args = ["--title", title, "--markdown", markdown_content]
+        args = ["--title", title, "--content", markdown_content, "--doc-format", "markdown"]
         if folder_token:
-            args += ["--folder-token", folder_token]
+            # v1.0.98 接口：docs 域 parent 参数为 --parent-token（旧 --folder-token 已 deprecated）
+            args += ["--parent-token", folder_token]
 
         # to_thread：CLI 子进程秒级 IO，期间释放事件循环（ADK 不自动线程化同步调用）
         result = await asyncio.to_thread(
@@ -2274,7 +2275,10 @@ async def update_lark_document(
         doc_token: The unique identifier or URL of the document.
         markdown_content: The new content or content to append in Lark-flavored Markdown.
         tool_context: The tool execution context.
-        mode: The update mode. Options: 'append' (default), 'overwrite', 'replace_range', 'replace_all', 'insert_before', 'insert_after', 'delete_range'.
+        mode: The update command. Options: 'append' (default), 'overwrite'.
+              整段/多块替换、精确删除等块级操作请改用 `execute_lark_cli` 总线运行
+              `docs +update --command str_replace|block_replace|block_insert_after|block_delete`
+              （支持 --pattern / --block-id 精确定位，v1.0.98 接口）。
 
     Returns:
         dict: A dictionary containing the update status.
@@ -2284,7 +2288,25 @@ async def update_lark_document(
         if not access_token:
             return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: "Authentication required."}
 
-        args = ["--doc", doc_token, "--markdown", markdown_content, "--mode", mode]
+        # v1.0.98 接口：--mode → --command；--markdown → --content + --doc-format markdown。
+        # 粗糙的自由文本定位模式（replace_range 等）已由 CLI 分化为精确 block 操作，
+        # 统一收敛到 execute_lark_cli 总线（registry 校验 + dry_run 门控）。
+        if mode not in ("append", "overwrite"):
+            return {
+                STATUS_KEY: STATUS_ERROR,
+                MESSAGE_KEY: (
+                    f"mode '{mode}' is no longer supported by the CLI v1.0.98 interface. "
+                    "Use 'append'/'overwrite' here, or run 'docs +update --command "
+                    "str_replace|block_replace|block_insert_after|block_delete' via "
+                    "execute_lark_cli for precise block-level edits."
+                ),
+            }
+        args = [
+            "--doc", doc_token,
+            "--command", mode,
+            "--content", markdown_content,
+            "--doc-format", "markdown",
+        ]
         result = await asyncio.to_thread(
             cli_client.run_command, "docs", "+update", args, access_token, LARK_CLIENT_ID
         )

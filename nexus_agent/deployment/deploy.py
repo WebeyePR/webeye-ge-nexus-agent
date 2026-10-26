@@ -125,9 +125,10 @@ from google.adk.agents.context_cache_config import ContextCacheConfig
 
 if os.getenv("AGENT_ENABLE_CONTEXT_CACHE", "1") == "0":
     # 回退路径：不预构建 App，保持模板默认行为（agent + app_name 显式传入）
+    # 注意：不传 enable_tracing（已弃用），遥测由部署 env_vars 的
+    # GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=false 统一关闭（下方 _run_deploy）
     app = StreamingAdkApp(
         agent=root_agent,
-        enable_tracing=False,  # 彻底避开 OpenTelemetry 的 Context 冲突
         app_name="webeye-nexus-agent-app",
         plugins=[
             ToolAuditPlugin(),
@@ -146,9 +147,9 @@ else:
         context_cache_config=ContextCacheConfig(min_tokens=4096),
     )
     # app_name/agent/plugins 均禁止传入（由 App 派生）
+    # 注意：不传 enable_tracing（已弃用），遥测由部署 env_vars 统一关闭（下方 _run_deploy）
     app = StreamingAdkApp(
         app=_deploy_app,
-        enable_tracing=False,  # 彻底避开 OpenTelemetry 的 Context 冲突
     )
 
 def _run_deploy() -> None:
@@ -212,6 +213,12 @@ def _run_deploy() -> None:
                 # 工具硬确认开关（GE 确认事件流验证未过时置 0 回退，见验证清单 F5）
                 "AGENT_ENABLE_TOOL_CONFIRMATION": os.getenv(
                     "AGENT_ENABLE_TOOL_CONFIRMATION", "1"
+                ),
+                # 遥测/Tracing 官方开关（替代已弃用的 AdkApp enable_tracing 参数，
+                # false 与原 enable_tracing=False 语义等效：Tracing 真值表
+                # None+false→false）。默认关闭，需要时部署前设 env 为 true。
+                "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": os.getenv(
+                    "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY", "false"
                 ),
             },
         )

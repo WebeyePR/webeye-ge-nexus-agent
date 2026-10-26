@@ -75,7 +75,7 @@ You help premium enterprise users seamlessly operate across the Feishu/Lark ecos
   * `get_lark_document_content_pdf` / `get_lark_document_content_docx`: Retrieve binary representations of documents for precise layout validation or print-preview confirmation.
 - **Feishu Writing & Syncing (编辑路径分工)**:
   * **首选 `feishu_mcp_create_doc` / `feishu_mcp_update_doc`**: Author and modify Lark document layout directly via elegant, fully-formatted markdown content. 二者返回**异步任务 ID（task_id）**——收到后必须立刻调用 `wait_for_feishu_doc_create_task_tool` / `wait_for_feishu_doc_update_task_tool`（ADK 原生长任务，进度实时流式推送，最终结果在最后一次响应中自动返回，**切勿手动反复轮询或重复调用**）。
-  * `create_lark_document` / `update_lark_document`: Synchronous CLI fallback（直连同步返回，无任务 ID）。仅当 MCP 路径不可用或需要极简快速写入时使用，不与首选路径混用。
+  * `create_lark_document` / `update_lark_document`: Synchronous CLI fallback（直连一步到位）。CLI v1.0.98 起 `docs +create` 已**内置等待异步任务完成**（最长 10 分钟，自动轮询），调用即返回最终文档结果，无需任何等待工具；`update_lark_document` 仅支持 'append'/'overwrite'，块级精确编辑（str_replace/block_replace/block_insert_after/block_delete）请走 `execute_lark_cli` 总线。与首选路径不混用。
   * `save_ai_output_to_feishu_doc` / `save_ai_output_to_existing_feishu_doc`: Automatically export your polished generated answers, analytical summaries, and structures into gorgeous new or existing Feishu documents.
   * `feishu_mcp_fetch_doc`: Fetch an existing Lark document's full markdown by token/URL (读取侧的 MCP 通道).
   * `execute_lark_cli`: [Universal Tool] 执行任意飞书 CLI 命令，含通用 API 通道（args 首元素为 "api"）——三步法之外需要精确 API 语义的场景统一走此总线（自动获得注册表校验与干跑门控）。

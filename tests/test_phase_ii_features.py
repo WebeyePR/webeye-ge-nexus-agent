@@ -457,3 +457,83 @@ def test_raw_plain_text_stdout_fallback():
 
 
 
+
+
+# ---------------------------------------------------------------------------
+# lark-cli v1.0.98 接口升级锚定测试（2026-10-27）
+# 旧 flag 已 deprecated：--markdown → --content + --doc-format markdown；
+# docs 域 --folder-token → --parent-token；--mode → --command（仅 append/overwrite）
+# ---------------------------------------------------------------------------
+
+def test_create_lark_document_uses_v1098_flags(monkeypatch):
+    """create_lark_document 必须拼 v1.0.98 现行 flags（禁止回归到 deprecated --markdown/--folder-token）。"""
+    captured = {}
+
+    def fake_run_command(service, cmd, args, access_token, client_id="", **kw):
+        captured["tuple"] = (service, cmd)
+        captured["args"] = list(args)
+        return {"status": "success", "content": "{}"}
+
+    monkeypatch.setattr(lark_tools, "get_access_token", lambda ctx: "fake-token")
+    monkeypatch.setattr(lark_tools.cli_client, "run_command", fake_run_command)
+    mock_ctx = MagicMock()
+
+    result = asyncio.run(
+        lark_tools.create_lark_document(
+            title="T", markdown_content="# M", tool_context=mock_ctx, folder_token="fldXXX"
+        )
+    )
+
+    assert result["status"] == "success"
+    assert captured["tuple"] == ("docs", "+create")
+    args = captured["args"]
+    assert "--markdown" not in args, "deprecated --markdown flag 不得出现"
+    assert "--folder-token" not in args, "docs 域 deprecated --folder-token 不得出现"
+    assert args.index("--content") == args.index("# M") - 1
+    assert args.index("--doc-format") == args.index("markdown") - 1
+    assert args.index("--parent-token") == args.index("fldXXX") - 1
+
+
+def test_update_lark_document_maps_mode_to_command(monkeypatch):
+    """update_lark_document：--mode → --command（append/overwrite），内容走 --content。"""
+    captured = {}
+
+    def fake_run_command(service, cmd, args, access_token, client_id="", **kw):
+        captured["args"] = list(args)
+        return {"status": "success", "content": "{}"}
+
+    monkeypatch.setattr(lark_tools, "get_access_token", lambda ctx: "fake-token")
+    monkeypatch.setattr(lark_tools.cli_client, "run_command", fake_run_command)
+    mock_ctx = MagicMock()
+
+    result = asyncio.run(
+        lark_tools.update_lark_document(
+            doc_token="docXXX", markdown_content="new body",
+            tool_context=mock_ctx, mode="append",
+        )
+    )
+
+    assert result["status"] == "success"
+    args = captured["args"]
+    assert "--mode" not in args, "deprecated --mode flag 不得出现"
+    assert "--markdown" not in args, "deprecated --markdown flag 不得出现"
+    assert args.index("--command") == args.index("append") - 1
+    assert args.index("--content") == args.index("new body") - 1
+    assert args.index("--doc-format") == args.index("markdown") - 1
+    assert args.index("--doc") == args.index("docXXX") - 1
+
+
+def test_update_lark_document_rejects_legacy_freeform_modes(monkeypatch):
+    """旧自由文本定位模式（replace_range 等）在 v1.0.98 下返回明确错误并指引总线工具。"""
+    monkeypatch.setattr(lark_tools, "get_access_token", lambda ctx: "fake-token")
+    mock_ctx = MagicMock()
+
+    for legacy_mode in ("replace_range", "replace_all", "insert_before", "delete_range"):
+        result = asyncio.run(
+            lark_tools.update_lark_document(
+                doc_token="docXXX", markdown_content="x",
+                tool_context=mock_ctx, mode=legacy_mode,
+            )
+        )
+        assert result["status"] == "error", legacy_mode
+        assert "execute_lark_cli" in result["message"]

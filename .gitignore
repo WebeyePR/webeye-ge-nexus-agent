@@ -47,3 +47,4 @@ build/
 *.whl
 .deploy_env-show*
 .understand-anything/
+.pytest_tmp/

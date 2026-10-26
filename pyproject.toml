@@ -42,4 +42,8 @@ nexus_agent = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# 固定 basetemp 到项目内目录（pytest 每次运行自动清空重建）。
+# 背景：共享 /tmp 的 pytest-of-* 基目录在某些沙箱环境下 mkdir 已存在目录会抛
+# EEXIST 导致 fixture setup 失败（2026-10-27 实测），固定 basetemp 一劳永逸绕开。
+addopts = "--basetemp=.pytest_tmp"
 

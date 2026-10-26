@@ -348,8 +348,8 @@ Docker 实测 `lark-cli api --help`（linux/amd64）：**原生支持 `--dry-run
 
 | 包装工具 | CLI 等价调用（execute_lark_cli / execute_google_workspace_cli 的 args） |
 |---|---|
-| create_lark_document | `["docs","+create","--title",T,"--markdown",M,"--folder-token",F]`（allow_mutating=True） |
-| update_lark_document | `["docs","+update","--doc",D,"--markdown",M,"--mode",mode]`（allow_mutating=True） |
+| create_lark_document | `["docs","+create","--title",T,"--content",M,"--doc-format","markdown","--parent-token",F]`（allow_mutating=True；v1.0.98 接口，2026-10-27 起 tools.py 已切此构造） |
+| update_lark_document | `["docs","+update","--doc",D,"--command","append\|overwrite","--content",M,"--doc-format","markdown"]`（allow_mutating=True；v1.0.98 接口，块级精确编辑走总线 `--command str_replace\|block_*`） |
 | delete_lark_document | `["drive","+delete","--file-token",T,"--type",ty,"--yes"]`（allow_mutating=True；硬确认仍由包装判定保证） |
 | search_google_drive_files | `["drive","files","list","--params","{\"q\":\"name contains 'Q' and trashed = false\",\"pageSize\":N}","--fields","files(id,name,mimeType,webViewLink,modifiedTime),nextPageToken"]` |
 | append_google_doc_text | `["docs","+write","--document",ID,"--text",T]` |
