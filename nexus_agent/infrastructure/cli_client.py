@@ -4,7 +4,7 @@ import json
 import logging
 import tempfile
 import shutil
-from typing import Optional, Dict, Any, List
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ class PackagedCLIClient:
     normalization.
     """
 
-    def __init__(self, bin_name: str, bin_path: Optional[str] = None):
+    def __init__(self, bin_name: str, bin_path: str | None = None):
         self.bin_name = bin_name
         self.bin_path = bin_path or self._resolve_bin_path(bin_name)
 
@@ -26,7 +26,7 @@ class PackagedCLIClient:
         package_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         return os.path.join(package_root, "bin", bin_name)
 
-    def _ensure_executable(self) -> Optional[Dict[str, Any]]:
+    def _ensure_executable(self) -> dict[str, Any] | None:
         if not os.path.exists(self.bin_path):
             return {
                 "status": "error",
@@ -44,7 +44,7 @@ class PackagedCLIClient:
 
         return None
 
-    def _parse_stdout(self, stdout: str) -> Dict[str, Any]:
+    def _parse_stdout(self, stdout: str) -> dict[str, Any]:
         stdout = stdout.strip()
         if not stdout:
             return {"status": "success", "data": None}
@@ -67,7 +67,7 @@ class PackagedCLIClient:
 
         return {"status": "success", "content": stdout}
 
-    def _format_args_for_log(self, args: List[str]) -> str:
+    def _format_args_for_log(self, args: list[str]) -> str:
         redacted_flags = {
             "--body",
             "--data",
@@ -96,11 +96,11 @@ class PackagedCLIClient:
 
     def _run(
         self,
-        args: List[str],
-        env: Dict[str, str],
+        args: list[str],
+        env: dict[str, str],
         tmp_home: str,
         timeout_seconds: int = 120,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         binary_error = self._ensure_executable()
         if binary_error:
             return binary_error
@@ -148,19 +148,19 @@ class CLIClient(PackagedCLIClient):
     Handles authentication via environment variables and executes commands.
     """
 
-    def __init__(self, bin_path: Optional[str] = None):
+    def __init__(self, bin_path: str | None = None):
         super().__init__("lark-cli", bin_path)
 
     def run_command(
         self,
         *args_pos,
-        args: Optional[list] = None,
-        access_token: Optional[str] = None,
-        client_id: Optional[str] = None,
-        app_id: Optional[str] = None,
+        args: list | None = None,
+        access_token: str | None = None,
+        client_id: str | None = None,
+        app_id: str | None = None,
         timeout_seconds: int = 120,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         运行 Feishu/Lark CLI 命令行工具。
         支持两种参数签名风格以确保 100% 的向后兼容性：
@@ -171,16 +171,16 @@ class CLIClient(PackagedCLIClient):
         风格 2（历史陈旧 positional 签名）：
             run_command(service, command, args, access_token, app_id)
         """
-        final_args: List[str] = []
-        final_token: Optional[str] = access_token
-        final_app_id: Optional[str] = client_id or app_id
+        final_args: list[str] = []
+        final_token: str | None = access_token
+        final_app_id: str | None = client_id or app_id
 
         # 1. 尝试匹配风格 2: 第一个参数是字符串，且位置参数个数 >= 3
         if len(args_pos) >= 3 and isinstance(args_pos[0], str):
             service = args_pos[0]
             command = args_pos[1]
             pos_args = args_pos[2]  # 应为参数 list
-            
+
             if service:
                 final_args.append(service)
             if command:
@@ -219,7 +219,7 @@ class CLIClient(PackagedCLIClient):
 
         # 创建临时的 HOME 目录以实现请求间的完全隔离
         tmp_home = tempfile.mkdtemp(prefix="lark_cli_")
-        
+
         env = os.environ.copy()
         env["HOME"] = tmp_home
         env["LARKSUITE_CLI_APP_ID"] = str(final_app_id)
@@ -248,10 +248,10 @@ class GoogleWorkspaceCLIClient(PackagedCLIClient):
     is not suitable for Agent Engine / Cloud Run runtime.
     """
 
-    def __init__(self, bin_path: Optional[str] = None):
+    def __init__(self, bin_path: str | None = None):
         super().__init__("gws", bin_path)
 
-    def _configure_ca_bundle(self, env: Dict[str, str]) -> None:
+    def _configure_ca_bundle(self, env: dict[str, str]) -> None:
         ca_bundle = env.get("SSL_CERT_FILE") or env.get("REQUESTS_CA_BUNDLE")
         if not ca_bundle:
             try:
@@ -271,7 +271,7 @@ class GoogleWorkspaceCLIClient(PackagedCLIClient):
         access_token: str,
         project_id: str = "",
         timeout_seconds: int = 120,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if not access_token:
             return {"status": "error", "message": "Missing Google Workspace access token."}
 
@@ -291,7 +291,7 @@ class GoogleWorkspaceCLIClient(PackagedCLIClient):
         finally:
             try:
                 shutil.rmtree(tmp_home, ignore_errors=True)
-            except:
+            except OSError:
                 pass
 
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Lark CLI 模块化命令注册表查询逻辑
 --------------------------------
@@ -11,7 +10,7 @@ Lark CLI 模块化命令注册表查询逻辑
 import json
 import re
 from importlib import resources
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 
 class CLICommandRegistry:
@@ -23,7 +22,7 @@ class CLICommandRegistry:
     def __init__(self, package_name: str, config_name: str = "commands.json"):
         """
         初始化平台命令行注册表。
-        
+
         Args:
             package_name: 该平台注册表所在的 Python 包名（例如 'nexus_agent.lark_registry'）。
             config_name: 索引配置文件的名称（默认为 'commands.json'）。
@@ -31,9 +30,9 @@ class CLICommandRegistry:
         self.package_name = package_name
         self.config_name = config_name
         # 实例级的惰性数据缓存，避免多实例并发时的全局缓存交织
-        self._registry_data: Optional[Dict[str, Dict[str, Any]]] = None
+        self._registry_data: dict[str, dict[str, Any]] | None = None
 
-    def _load_registry(self) -> Dict[str, Dict[str, Any]]:
+    def _load_registry(self) -> dict[str, dict[str, Any]]:
         """
         带实例内部缓存的注册表加载，保证极速访问。
         当首次访问时加载文件并将其常驻于内存中，避免重复 I/O。
@@ -50,7 +49,7 @@ class CLICommandRegistry:
             self._registry_data = {}
             return self._registry_data
 
-        registry: Dict[str, Dict[str, Any]] = {}
+        registry: dict[str, dict[str, Any]] = {}
         for command_id, spec in raw_registry.items():
             normalized = dict(spec)
             normalized["command_id"] = command_id
@@ -69,7 +68,7 @@ class CLICommandRegistry:
         self._registry_data = registry
         return self._registry_data
 
-    def _tokenize(self, value: str) -> Set[str]:
+    def _tokenize(self, value: str) -> set[str]:
         """
         通用检索分词器：过滤特殊字符并将英文分词归一化小写。
         同时，对于包含 '+'、'.'、'_'、'-' 的词，我们也将其纯净字母数字部分作为词素加入分词集合。
@@ -89,7 +88,7 @@ class CLICommandRegistry:
                         refined_tokens.add(part)
         return refined_tokens
 
-    def _public_spec(self, spec: Dict[str, Any]) -> Dict[str, Any]:
+    def _public_spec(self, spec: dict[str, Any]) -> dict[str, Any]:
         """
         输出过滤：在不影响原有内部规范前提下，将原有的 argv 重命名或克隆为 argv_template，对 LLM 更友好
         """
@@ -97,10 +96,10 @@ class CLICommandRegistry:
         public["argv_template"] = public.pop("argv_template", public["argv"])
         return public
 
-    def get_command_spec(self, command_id: str) -> Optional[Dict[str, Any]]:
+    def get_command_spec(self, command_id: str) -> dict[str, Any] | None:
         """
         根据 command_id 精确查询单个命令的参数规范和示例
-        
+
         Args:
             command_id: 命令的唯一 ID 标识符
         """
@@ -116,12 +115,12 @@ class CLICommandRegistry:
         query: str = "",
         service: str = "",
         intent: str = "",
-        resource_parts: Optional[List[str]] = None,
+        resource_parts: list[str] | None = None,
         limit: int = 8,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         多维度多层次模糊搜索与 NLP 分词检索。
-        
+
         Args:
             query: 自然语言查询，如 "send chat message"
             service: 业务域过滤，如 "im"
@@ -188,12 +187,12 @@ class CLICommandRegistry:
         scored.sort(key=lambda item: (-item[0], item[1]))
         return [spec for _, _, spec in scored[:limit]]
 
-    def find_command_for_args(self, args: List[str]) -> Optional[Dict[str, Any]]:
+    def find_command_for_args(self, args: list[str]) -> dict[str, Any] | None:
         """
         逆向推导：根据当前物理执行的命令行参数，匹配其在注册表中最长对齐的规范 spec。
         主要用于在拦截通用 flat 执行或传统 CLI 执行时，自动判断 RequiresConfirmation 或 Mutation 操作。
         """
-        best: Optional[Dict[str, Any]] = None
+        best: dict[str, Any] | None = None
         best_len = 0
         for spec in self._load_registry().values():
             argv = spec.get("argv", [])
@@ -209,11 +208,11 @@ class CLICommandRegistry:
 # -----------------------------------------------------------------------------
 # Lark 专属向后兼容模块级接口层（Wrapper）
 # -----------------------------------------------------------------------------
-# 创建 Lark 专属注册表服务单例，加载 lark_registry 目录下的 commands.json 
+# 创建 Lark 专属注册表服务单例，加载 lark_registry 目录下的 commands.json
 _lark_registry_service = CLICommandRegistry(__package__)
 
 
-def get_command_spec(command_id: str) -> Optional[Dict[str, Any]]:
+def get_command_spec(command_id: str) -> dict[str, Any] | None:
     """
     【Lark 兼容接口 1】根据 command_id 查询单个命令 spec
     保持与 tools.py 导入的原函数接口和行为一致
@@ -225,9 +224,9 @@ def search_commands(
     query: str = "",
     service: str = "",
     intent: str = "",
-    resource_parts: Optional[List[str]] = None,
+    resource_parts: list[str] | None = None,
     limit: int = 8,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     【Lark 兼容接口 2】多维度模糊搜索与检索注册表
     保持与 tools.py 导入的原函数接口和行为一致
@@ -241,7 +240,7 @@ def search_commands(
     )
 
 
-def find_command_for_args(args: List[str]) -> Optional[Dict[str, Any]]:
+def find_command_for_args(args: list[str]) -> dict[str, Any] | None:
     """
     【Lark 兼容接口 3】根据运行参数反向推导最匹配的命令 spec
     保持与 tools.py 导入的原函数接口和行为一致

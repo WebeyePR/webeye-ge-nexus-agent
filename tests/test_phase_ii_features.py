@@ -94,10 +94,10 @@ def test_create_google_doc_with_text_html_conversion_and_cleanup(monkeypatch):
         upload_idx = args.index("--upload")
         temp_filename = args[upload_idx + 1]
         temp_files_found.append(temp_filename)
-        
+
         # Verify the temporary file actually exists in Cwd during the execution
         assert os.path.exists(temp_filename)
-        with open(temp_filename, "r", encoding="utf-8") as f:
+        with open(temp_filename, encoding="utf-8") as f:
             html = f.read()
             # Ensure it contains h2 and list elements translated from markdown
             assert "<h2>My Subtitle</h2>" in html
@@ -264,7 +264,7 @@ def test_registry_tokenizer_boundary_conditions():
     确保其不发生异常崩溃（crash-safe）并具备优秀的降级和分词合并机制。
     """
     from nexus_agent.lark_registry.registry import CLICommandRegistry
-    
+
     registry = CLICommandRegistry("nexus_agent")
 
     # 1. 测试 None 输入

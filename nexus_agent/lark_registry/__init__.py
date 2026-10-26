@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Lark Command Registry Package
 """

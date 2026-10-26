@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Google Workspace (GWS) CLI 模块化命令注册表查询逻辑
 --------------------------------------------------
@@ -9,7 +8,7 @@ Google Workspace (GWS) CLI 模块化命令注册表查询逻辑
 模块提供 100% 的模块级 API 向后兼容。
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 from nexus_agent.lark_registry.registry import CLICommandRegistry
 
 # -----------------------------------------------------------------------------
@@ -23,7 +22,7 @@ _gws_registry_service = CLICommandRegistry(__package__)
 # GWS 专属向后兼容模块级接口层（Wrapper）
 # -----------------------------------------------------------------------------
 
-def get_command_spec(command_id: str) -> Optional[Dict[str, Any]]:
+def get_command_spec(command_id: str) -> dict[str, Any] | None:
     """
     【GWS 兼容接口 1】根据 command_id 精确查询单个 GWS 命令的参数规范和示例。
     保持与 tools.py 导入的原函数接口和行为一致。
@@ -35,9 +34,9 @@ def search_commands(
     query: str = "",
     service: str = "",
     intent: str = "",
-    resource_parts: Optional[List[str]] = None,
+    resource_parts: list[str] | None = None,
     limit: int = 8,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     【GWS 兼容接口 2】多维度多层次模糊搜索与 NLP 分词检索。
     保持与 tools.py 导入的原函数接口和行为一致。
@@ -52,7 +51,7 @@ def search_commands(
     )
 
 
-def find_command_for_args(args: List[str]) -> Optional[Dict[str, Any]]:
+def find_command_for_args(args: list[str]) -> dict[str, Any] | None:
     """
     【GWS 兼容接口 3】逆向推导：根据当前物理执行的命令行参数，匹配其在注册表中最对齐的规范 spec。
     保持与 tools.py 导入的原函数接口和行为一致。

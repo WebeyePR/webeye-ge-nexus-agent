@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import re
-import time
 
 
 from google.adk.tools import LongRunningFunctionTool, ToolContext
@@ -208,10 +207,10 @@ def _clean_markdown_from_plain_text(text: str) -> str:
     """
     if not isinstance(text, str):
         return text
-    
+
     # 物理洗涤还原：将大模型可能幻觉出的字面量 \\n 强行还原为真实的换行符
     text = text.replace("\\n", "\n")
-    
+
     import re
     # 1. 匹配并清洗 Markdown 标题：如 '\n# Title\n' -> '\n★ TITLE ★\n'
     def replace_header(match):
@@ -221,25 +220,25 @@ def _clean_markdown_from_plain_text(text: str) -> str:
             return f"\n★ {content.upper()} ★\n"
         else:
             return f"\n【{content}】\n"
-            
+
     text = re.sub(r'^(#{1,6})\s+(.+)$', replace_header, text, flags=re.MULTILINE)
-    
+
     # 2. 清洗加粗/斜体控制符
     text = re.sub(r'\*{3}(.*?)\*{3}', r'\1', text) # ***bold-italic***
     text = re.sub(r'\*{2}(.*?)\*{2}', r'\1', text) # **bold**
     text = re.sub(r'_(.*?)_', r'\1', text)         # _italic_
     text = re.sub(r'\*(.*?)\*', r'\1', text)       # *italic*
     text = re.sub(r'__([\s\S]*?)__', r'\1', text)   # __bold__
-    
+
     # 3. 清洗代码块反引号
     text = re.sub(r'```[a-zA-Z]*\n?', '', text)
-    
+
     # 4. 去除行尾多余空格
     lines = text.split("\n")
     cleaned_lines = []
     for line in lines:
         cleaned_lines.append(line.rstrip())
-        
+
     return "\n".join(cleaned_lines)
 
 
@@ -253,7 +252,7 @@ def _run_google_workspace_cli(args: list, tool_context: ToolContext, timeout_sec
 
         # 物理洗涤层：抗幻觉自愈，将大模型在命令行参数中可能幻觉出的字面量 \\n 强行还原为真实的换行符
         args = [arg.replace("\\n", "\n") if isinstance(arg, str) else arg for arg in args]
-        
+
         access_token = get_google_workspace_access_token(tool_context)
         if not access_token:
             return {
@@ -295,15 +294,15 @@ def _robust_clean_json(json_str: str, field_name: str = "json") -> str:
     """
     if json_str in (None, ""):
         return ""
-    
+
     if not isinstance(json_str, str):
         # 若直接传入 Python 字典或列表，直接序列化返回
         return json.dumps(json_str, ensure_ascii=False)
-        
+
     cleaned = json_str.strip()
     if not cleaned:
         return ""
-        
+
     # 容错 1：去除画蛇添足的外层单/双引号包裹，如 '{"foo": "bar"}' -> {"foo": "bar"}
     if (cleaned.startswith("'") and cleaned.endswith("'")) or (cleaned.startswith('"') and cleaned.endswith('"')):
         candidate = cleaned[1:-1].strip()
@@ -330,7 +329,7 @@ def _robust_clean_json(json_str: str, field_name: str = "json") -> str:
         decoded_once = json.loads(f'"{cleaned}"')
         json.loads(decoded_once)
         return decoded_once
-    except:
+    except (ValueError, TypeError):
         pass
 
     # 修复失败，抛出带有清晰示例和诊断指引的异常，帮助 AI 能够在第二次调用中 100% 自我修正
@@ -623,48 +622,48 @@ async def execute_google_workspace_cli_flat(
             return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: f"Unsupported gws service: {service_clean}"}
 
         args = [service_clean]
-        
+
         # 解析 resource (如 "users messages" -> ["users", "messages"])
         resource_parts = _parse_gws_resource_path(resource)
         args.extend(resource_parts)
-        
+
         # 添加 method
         method_clean = method.strip()
         if not method_clean or method_clean.startswith("-"):
             return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: f"Invalid method name: {method}"}
         args.append(method_clean)
-        
+
         # 验证并添加 params
         if params_json and params_json.strip():
             params_arg = _coerce_json_cli_arg(params_json, "params_json")
             args.extend(["--params", params_arg])
-            
+
         # 验证并添加 json_body
         if json_body and json_body.strip():
             json_arg = _coerce_json_cli_arg(json_body, "json_body")
             args.extend(["--json", json_arg])
-            
+
         # 验证并添加 upload_file
         if upload_file and upload_file.strip():
             file_clean = upload_file.strip()
             if "/" in file_clean or ".." in file_clean:
                 return {
-                    STATUS_KEY: STATUS_ERROR, 
+                    STATUS_KEY: STATUS_ERROR,
                     MESSAGE_KEY: "Absolute paths and parent-directory traversal are not allowed for upload_file."
                 }
             args.extend(["--upload", file_clean])
-            
+
         if page_all:
             args.append("--page-all")
-            
+
         # 校验和自动 dry-run
         command_spec = find_command_for_args(args)
         registry_marks_mutating = bool(command_spec and command_spec.get("kind") != "read")
         if dry_run and (registry_marks_mutating or _is_gws_mutating_args(args)) and "--dry-run" not in args:
             args.append("--dry-run")
-            
+
         _validate_gws_args(args, allow_mutating=allow_mutating)
-        
+
     except Exception as e:
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: str(e)}
 
@@ -753,28 +752,24 @@ async def create_google_doc_with_text(title: str, text: str, tool_context: ToolC
         # 将本地相对产物图和私有/有鉴权的飞书图转换成设计精美的企业安全隔离提示卡，以防在 Google Docs 中出现损坏裂图；
         # 公开公网直链图保留为标准 HTML <img>，支持 Google 官方服务器原生抓取并嵌入。
         img_pattern = r'!\[(.*?)\]\((https?://[^\s)]+|[^\s)]+)\)'
-        
+
         def replace_img_tag_for_gdoc(match):
             alt = match.group(1) or "图片"
             url = match.group(2)
-            
+
             is_private = False
-            if not (url.startswith("http://") or url.startswith("https://")):
+            if not (url.startswith("http://") or url.startswith("https://")) or any(domain in url for domain in ["feishu.cn", "larksuite.com", "feishu-open.cn"]) or "authcode" in url:
                 is_private = True
-            elif any(domain in url for domain in ["feishu.cn", "larksuite.com", "feishu-open.cn"]):
-                is_private = True
-            elif "authcode" in url:
-                is_private = True
-                
+
             if is_private:
                 filename = url.split("/")[-1] if "/" in url else url
                 if "?" in filename:
                     filename = filename.split("?")[0]
                 if not filename or len(filename) < 3 or filename == "authcode":
                     filename = "lark_embedded_image.png"
-                    
+
                 original_link_html = f'<p style="margin: 6px 0 0 0; font-size: 12px;"><a href="{url}" target="_blank" style="color: #1a73e8; text-decoration: underline;">点击安全总线外部通道查看原图 (Open Original Link)</a></p>' if url.startswith("http") else ""
-                
+
                 return f'''
 <table cellpadding="12" cellspacing="0" border="1" style="border: 1px dashed #4a90e2; background-color: #f4f8fa; width: 100%; border-collapse: collapse;">
   <tr>
@@ -803,7 +798,7 @@ async def create_google_doc_with_text(title: str, text: str, tool_context: ToolC
             if i > 0:
                 prev_line = preprocessed_lines[-1]
                 prev_stripped = prev_line.strip()
-                
+
                 # a) 表格起始行补空行
                 if stripped.startswith("|") and stripped.endswith("|"):
                     if prev_stripped and not (prev_stripped.startswith("|") and prev_stripped.endswith("|")):
@@ -831,19 +826,19 @@ async def create_google_doc_with_text(title: str, text: str, tool_context: ToolC
             html_content = markdown.markdown(final_markdown_text, extensions=['tables', 'fenced_code', 'nl2br'])
         except ImportError:
             logger.warning("[create_google_doc_with_text] markdown module not found. Falling back to robust custom parser.")
-            
+
             # 🌟 极致增强的高阶内置 Markdown Fallback 编译器
             # 即使在沙箱中缺失编译包，也能高品质、完整地将多级标题、列表、多维表格、引用块、水平线和行内富格式全部编译
             lines = final_markdown_text.split("\n")
             converted_lines = []
-            
+
             in_list = False
             in_ordered_list = False
             in_quote = False
             in_code = False
             in_table = False
             table_header_parsed = False
-            
+
             def inline_replace(t):
                 # 1. 优先解析超链接 Markdown 格式 [text](url) -> <a href="url">text</a>
                 t = re.sub(r'\[(.*?)\]\((https?://[^\s)]+|[^\s)]+)\)', r'<a href="\2">\1</a>', t)
@@ -859,7 +854,7 @@ async def create_google_doc_with_text(title: str, text: str, tool_context: ToolC
 
             for line in lines:
                 stripped = line.strip()
-                
+
                 # a) 代码块
                 if stripped.startswith("```"):
                     if in_code:
@@ -870,12 +865,12 @@ async def create_google_doc_with_text(title: str, text: str, tool_context: ToolC
                         if in_ordered_list: converted_lines.append("</ol>"); in_ordered_list = False
                         if in_quote: converted_lines.append("</blockquote>"); in_quote = False
                         if in_table: converted_lines.append("</table>"); in_table = False; table_header_parsed = False
-                        
+
                         lang = stripped[3:].strip()
                         converted_lines.append(f'<pre><code class="{lang}">' if lang else "<pre><code>")
                         in_code = True
                     continue
-                    
+
                 if in_code:
                     escaped_line = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                     converted_lines.append(escaped_line)
@@ -887,7 +882,7 @@ async def create_google_doc_with_text(title: str, text: str, tool_context: ToolC
                     if in_ordered_list: converted_lines.append("</ol>"); in_ordered_list = False
                     if in_quote: converted_lines.append("</blockquote>"); in_quote = False
                     if in_table: converted_lines.append("</table>"); in_table = False; table_header_parsed = False
-                    
+
                     converted_lines.append("<hr />")
                     continue
 
@@ -898,7 +893,7 @@ async def create_google_doc_with_text(title: str, text: str, tool_context: ToolC
                     if in_ordered_list: converted_lines.append("</ol>"); in_ordered_list = False
                     if in_quote: converted_lines.append("</blockquote>"); in_quote = False
                     if in_table: converted_lines.append("</table>"); in_table = False; table_header_parsed = False
-                    
+
                     level = len(header_match.group(1))
                     content = inline_replace(header_match.group(2))
                     converted_lines.append(f"<h{level}>{content}</h{level}>")
@@ -909,21 +904,21 @@ async def create_google_doc_with_text(title: str, text: str, tool_context: ToolC
                     if in_list: converted_lines.append("</ul>"); in_list = False
                     if in_ordered_list: converted_lines.append("</ol>"); in_ordered_list = False
                     if in_quote: converted_lines.append("</blockquote>"); in_quote = False
-                    
+
                     if re.match(r"^\|[\s\-\|:]+\|$", stripped):
                         continue
-                        
+
                     if not in_table:
                         converted_lines.append('<table border="1" style="border-collapse: collapse; width: 100%;">')
                         in_table = True
                         table_header_parsed = False
-                        
+
                     columns = [col.strip() for col in stripped.split("|")[1:-1]]
                     col_tag = "th" if not table_header_parsed else "td"
                     bg_style = ' style="background-color: #f2f2f2; padding: 8px;"' if not table_header_parsed else ' style="padding: 8px;"'
                     row_html = "<tr>" + "".join(f"<{col_tag}{bg_style}>{inline_replace(col)}</{col_tag}>" for col in columns) + "</tr>"
                     converted_lines.append(row_html)
-                    
+
                     if not table_header_parsed:
                         table_header_parsed = True
                     continue
@@ -938,7 +933,7 @@ async def create_google_doc_with_text(title: str, text: str, tool_context: ToolC
                 if list_match:
                     if in_ordered_list: converted_lines.append("</ol>"); in_ordered_list = False
                     if in_quote: converted_lines.append("</blockquote>"); in_quote = False
-                    
+
                     if not in_list:
                         converted_lines.append("<ul>")
                         in_list = True
@@ -951,7 +946,7 @@ async def create_google_doc_with_text(title: str, text: str, tool_context: ToolC
                 if olist_match:
                     if in_list: converted_lines.append("</ul>"); in_list = False
                     if in_quote: converted_lines.append("</blockquote>"); in_quote = False
-                    
+
                     if not in_ordered_list:
                         converted_lines.append("<ol>")
                         in_ordered_list = True
@@ -963,7 +958,7 @@ async def create_google_doc_with_text(title: str, text: str, tool_context: ToolC
                 if stripped.startswith(">"):
                     if in_list: converted_lines.append("</ul>"); in_list = False
                     if in_ordered_list: converted_lines.append("</ol>"); in_ordered_list = False
-                    
+
                     if not in_quote:
                         converted_lines.append('<blockquote style="border-left: 3px solid #ccc; padding-left: 10px; color: #555; margin-left: 0;">')
                         in_quote = True
@@ -978,22 +973,22 @@ async def create_google_doc_with_text(title: str, text: str, tool_context: ToolC
                 # h) 普通段落
                 if in_list: converted_lines.append("</ul>"); in_list = False
                 if in_ordered_list: converted_lines.append("</ol>"); in_ordered_list = False
-                
+
                 if not stripped:
                     continue
-                
+
                 # Check for image or raw elements inside html tags that were bypassed during cleaning
                 if stripped.startswith("<div") or stripped.startswith("</div") or stripped.startswith("<p") or stripped.startswith("<img"):
                     converted_lines.append(line)
                 else:
                     converted_lines.append(f"<p>{inline_replace(stripped)}</p>")
-                
+
             if in_code: converted_lines.append("</code></pre>")
             if in_list: converted_lines.append("</ul>")
             if in_ordered_list: converted_lines.append("</ol>")
             if in_quote: converted_lines.append("</blockquote>")
             if in_table: converted_lines.append("</table>")
-            
+
             html_content = "<html><body>\n" + "\n".join(converted_lines) + "\n</body></html>"
 
         # 4. 在当前 Cwd (工作空间) 相对路径创建临时文件，完美避开绝对路径拦截
@@ -1005,7 +1000,7 @@ async def create_google_doc_with_text(title: str, text: str, tool_context: ToolC
             "name": title.strip(),
             "mimeType": "application/vnd.google-apps.document"
         }
-        
+
         create_result = await asyncio.to_thread(
             _run_google_workspace_cli,
             [
@@ -1301,7 +1296,7 @@ def _run_lark_cli(args: list, tool_context: ToolContext, timeout_seconds: int = 
 
         # 物理洗涤层：抗幻觉自愈，将大模型在命令行参数中可能幻觉出的字面量 \\n 强行还原为真实的换行符
         args = [arg.replace("\\n", "\n") if isinstance(arg, str) else arg for arg in args]
-        
+
         access_token = get_access_token(tool_context)
         if not access_token:
             return {
@@ -1496,7 +1491,7 @@ def get_lark_operation_schema(method_path: str, tool_context: ToolContext) -> di
     service = safe_method.split(".", 1)[0]
     if service not in LARK_ALLOWED_SERVICES:
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: f"Unsupported Feishu/Lark service: {service}"}
-    
+
     result = _run_lark_cli(["schema", safe_method], tool_context, timeout_seconds=60)
     if result.get(STATUS_KEY) != STATUS_SUCCESS:
         return result
@@ -1551,7 +1546,7 @@ async def execute_lark_cli(
     timeout_seconds = _safe_limit(timeout_seconds, default=120, minimum=10, maximum=300)
     # to_thread：CLI 子进程秒级 IO，期间释放事件循环（ADK 同步调用不自动线程化）
     result = await asyncio.to_thread(_run_lark_cli, args, tool_context, timeout_seconds=timeout_seconds)
-    
+
     if command_spec:
         result = dict(result)
         result["command_id"] = command_spec["command_id"]
@@ -1595,49 +1590,49 @@ async def execute_lark_cli_flat(
             return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: f"Unsupported Feishu/Lark service: {service_clean}"}
 
         args = [service_clean]
-        
+
         resource_parts = _parse_lark_resource_path(resource)
         args.extend(resource_parts)
-        
+
         method_clean = method.strip()
         if not method_clean or method_clean.startswith("-"):
             return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: f"Invalid method name: {method}"}
         args.append(method_clean)
-        
+
         if params_json and params_json.strip():
             params_arg = _coerce_json_cli_arg(params_json, "params_json")
             args.extend(["--params", params_arg])
-            
+
         if json_body and json_body.strip():
             json_arg = _coerce_json_cli_arg(json_body, "json_body")
             args.extend(["--json", json_arg])
-            
+
         if upload_file and upload_file.strip():
             file_clean = upload_file.strip()
             if "/" in file_clean or ".." in file_clean:
                 return {
-                    STATUS_KEY: STATUS_ERROR, 
+                    STATUS_KEY: STATUS_ERROR,
                     MESSAGE_KEY: "Absolute paths and parent-directory traversal are not allowed for upload_file."
                 }
             args.extend(["--upload", file_clean])
-            
+
         if page_all:
             args.append("--page-all")
-            
+
         command_spec = find_lark_command_for_args(args)
         registry_marks_mutating = bool(command_spec and command_spec.get("kind") != "read")
         if dry_run and (registry_marks_mutating or _is_lark_mutating_args(args)) and "--dry-run" not in args:
             args.append("--dry-run")
-            
+
         _validate_lark_args(args, allow_mutating=allow_mutating)
-        
+
     except Exception as e:
         return {STATUS_KEY: STATUS_ERROR, MESSAGE_KEY: str(e)}
 
     timeout_seconds = _safe_limit(timeout_seconds, default=120, minimum=10, maximum=300)
     # to_thread：CLI 子进程秒级 IO，期间释放事件循环（ADK 同步调用不自动线程化）
     result = await asyncio.to_thread(_run_lark_cli, args, tool_context, timeout_seconds=timeout_seconds)
-    
+
     if command_spec:
         result = dict(result)
         result["command_id"] = command_spec["command_id"]
@@ -1839,7 +1834,7 @@ async def get_lark_document_markdown(
                 logger.info(f"[get_lark_document_markdown] Found {len(matches)} images in markdown. Attempting to save as artifacts...")
                 from nexus_agent.infrastructure.lark_api_repository import _session
                 from google.genai import types
-                
+
                 url_to_artifact = {}
                 headers = {"Authorization": f"Bearer {access_token}"}
 
@@ -1884,7 +1879,7 @@ async def get_lark_document_markdown(
                             artifact_filename = f"lark_{doc_hash}_{safe_alt}"
                             artifact_part = types.Part.from_bytes(data=img_bytes, mime_type=mime_type)
                             version = await tool_context.save_artifact(filename=artifact_filename, artifact=artifact_part)
-                            
+
                             url_to_artifact[img_url] = (artifact_filename, version)
                         else:
                             logger.warning(f"[get_lark_document_markdown] Skip image download. Status code: {response.status_code}")
@@ -2172,10 +2167,10 @@ async def get_lark_document_rich_content(
                             target_ext = ext_map.get(mime, ".jpg")
                             if not any(safe_img_name.lower().endswith(ext) for ext in ext_map.values()):
                                 safe_img_name = f"{safe_img_name}{target_ext}"
-                            
+
                             filename_in_service = f"lark_rich_{doc_token[:8]}_{safe_img_name}"
                             version = await tool_context.save_artifact(filename=filename_in_service, artifact=artifact_part)
-                            
+
                             text_segments.append(
                                 f"\n[📷 图片 '{img_name}' 已作为 ADK 产物成功渲染，请在侧边栏中预览：'{filename_in_service}' (版本 {version})，亦可通过下方视觉通道感知]\n"
                             )
@@ -2819,7 +2814,7 @@ async def render_image_as_artifact(
         from google.genai import types
         import hashlib
         from urllib.parse import urlparse
-        
+
         # 1. 针对飞书链接，添加 Lark access_token 鉴权头以确保下载成功
         headers = {}
         is_feishu = any(domain in image_url for domain in ["feishu.cn", "larksuite.com", "feishu-open.cn"])
@@ -2834,7 +2829,7 @@ async def render_image_as_artifact(
         response = await asyncio.to_thread(
             _session.get, image_url, headers=headers, timeout=30
         )
-        
+
         if response.status_code != 200:
             logger.error(f"[render_image_as_artifact] Failed to download image from {image_url}. Status: {response.status_code}")
             return {

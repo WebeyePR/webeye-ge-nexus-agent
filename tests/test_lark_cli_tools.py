@@ -236,7 +236,7 @@ def test_cli_command_registry_multi_instance_extensibility():
 
     # 1. 实例化 Lark 注册表服务
     registry_lark = CLICommandRegistry("nexus_agent.lark_registry")
-    
+
     # 2. 实例化一个不存在的或空的平台注册表服务（用于模拟未来新平台的空状态/缺失状态）
     registry_wecom = CLICommandRegistry("nexus_agent.wecom_registry", config_name="wecom_commands.json")
 

@@ -15,7 +15,7 @@ labels 时构造 RunConfig（且从不设置 ``StreamingMode.SSE``，默认
 （源码位置：``vertexai/agent_engines/templates/adk.py`` 的
 ``streaming_agent_run_with_events``，1496-1620 行），仅在构造
 ``run_config`` 处注入 ``streaming_mode=StreamingMode.SSE``，
-并保留模板新增的 labels 透传 / authorizations state_delta / 
+并保留模板新增的 labels 透传 / authorizations state_delta /
 _save_artifacts 逻辑。
 
 ## ⚠️ 版本约束（重要）

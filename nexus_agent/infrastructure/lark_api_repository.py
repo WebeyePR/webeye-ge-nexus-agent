@@ -1,6 +1,5 @@
 import logging
 import io
-import xml.etree.ElementTree as ET
 import time
 import json
 import uuid
