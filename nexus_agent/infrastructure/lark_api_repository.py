@@ -1,9 +1,7 @@
 import logging
 import io
-import zipfile
 import xml.etree.ElementTree as ET
 import time
-import base64
 import json
 import uuid
 from urllib3.util.retry import Retry
@@ -63,7 +61,7 @@ def search_documents(access_token: str, query: str, count: int = 20) -> list:
 
     技术细节：
     - API限制：page_size 最大为20
-    - 返回的URL可以直接使用，无需调用 batch_get_document_urls
+    - 返回的URL可直接使用，无需额外批量查询
     - 搜索结果包含 title_highlighted 和 summary_highlighted，已包含关键字高亮标记 <h>...</h>
 
     Args:
@@ -153,94 +151,6 @@ def search_documents(access_token: str, query: str, count: int = 20) -> list:
         documents.append(doc_info)
 
     return documents
-
-
-def batch_get_document_urls(access_token: str, docs_list: list) -> dict:
-    """
-    [DEPRECATED] Batch queries document metadata to retrieve URLs.
-
-    ⚠️ 此函数已弃用，不再被使用。
-
-    原因：
-    - 新的搜索API (search/v2/doc_wiki/search) 已经直接返回URL
-    - 不再需要额外的批量查询API调用
-    - 旧API需要额外的权限 (drive:drive, drive:drive.metadata:readonly)
-
-    历史：
-    - 之前用于在搜索后批量获取文档URL
-    - 现在 search_documents() 已经直接返回URL，无需此步骤
-
-    保留原因：
-    - 暂时保留以防回滚需要
-    - 计划在确认新API稳定后删除
-
-    Args:
-        access_token: The user access token.
-        docs_list: List of document objects (containing docs_token and docs_type).
-
-    Returns:
-        A dictionary mapping doc_token to its URL.
-    """
-    url = f"{LARK_DOMAIN}/open-apis/drive/v1/metas/batch_query"
-
-    if not docs_list:
-        return {}
-
-    # 构建请求文档列表，检查字段名
-    request_docs = []
-    for doc in docs_list:
-        # 搜索 API 返回的字段可能是 "docs_token" 或 "token"
-        doc_token = doc.get("docs_token") or doc.get("token")
-        # 搜索 API 返回的字段可能是 "docs_type" 或 "type"
-        doc_type = doc.get("docs_type") or doc.get("type") or "doc"
-
-        # 类型映射：搜索 API 返回 "doc"，但批量查询 API 需要 "docx"
-        type_mapping = {
-            "doc": "docx",
-            "sheet": "sheet",
-            "slides": "slides",
-            "bitable": "bitable",
-            "file": "file",
-        }
-        doc_type = type_mapping.get(doc_type, doc_type)
-
-        if doc_token:
-            request_docs.append({"doc_token": doc_token, "doc_type": doc_type})
-
-    if not request_docs:
-        return {}
-
-    payload = {"request_docs": request_docs, "with_url": True}
-
-    try:
-        response = _session.post(url, headers=_get_header(access_token), json=payload)
-        response.raise_for_status()
-        data = response.json()
-
-        # 检查飞书 API 的错误码
-        if data.get("code") != 0:
-            error_msg = data.get("msg", "Unknown error")
-            error_code = data.get("code", "Unknown")
-            logger.error(
-                f"Lark API Batch Query Error: {error_msg} (Code: {error_code})"
-            )
-            raise Exception(f"Lark Batch Query Error [Code {error_code}]: {error_msg}")
-
-        url_map = {}
-        metas = data.get("data", {}).get("metas", [])
-        for meta in metas:
-            doc_token = meta.get("doc_token")
-            url_value = meta.get("url")
-            if doc_token and url_value:
-                url_map[doc_token] = url_value
-
-        return url_map
-    except HTTPError as e:
-        logger.error(f"HTTP Error: {e}")
-        logger.error(f"Response: {e.response.text if e.response else 'No response'}")
-        raise
-
-
 def get_document_content(
     access_token: str, doc_token: str, doc_type: str = "docx"
 ) -> str:
@@ -731,51 +641,6 @@ def _export_document(
 
     # 3. 下载导出的媒体文件
     return _download_document_by_export(access_token, result_file_token)
-
-
-def _process_image_to_base64(
-    image_bytes: bytes, max_size=(1536, 1536), quality=85
-) -> str:
-    """
-    处理图片：调整大小、压缩并转换为 Base64 字符串（JPG 格式）。
-
-    Args:
-        image_bytes: 原始图片二进制数据。
-        max_size: 最大宽高。
-        quality: JPG 压缩质量 (1-100)。
-
-    Returns:
-        Processed image as a base64 string.
-    """
-    try:
-        logger.info(f"--- [before] image_bytes len --- {len(image_bytes)}")
-        img = Image.open(io.BytesIO(image_bytes))
-
-        # 转换为 RGB (防止透明度问题及兼容 JPG)
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
-
-        # 调整大小 (保持比例)，1536px 是 Gemini 视觉识别的甜点位，既清晰又不会超大
-        img.thumbnail(max_size, Image.Resampling.LANCZOS)
-
-        # 保存到内存
-        output = io.BytesIO()
-        img.save(output, format="JPEG", quality=quality, optimize=True)
-        processed_bytes = output.getvalue()
-
-        data = base64.b64encode(processed_bytes).decode("utf-8")
-        # if data.startswith("data:image"):
-        #     data = data.split(",", 1)[-1]
-        logger.info(f"--- [after] image len --- {len(data)}")
-        return data
-    except Exception as e:
-        logger.warning(
-            f"Image processing failed: {str(e)}. Falling back to original base64."
-        )
-        # 如果处理失败，尝试原样返回（简单 base64）
-        return base64.b64encode(image_bytes).decode("utf-8")
-
-
 def _process_image_to_bytes(
     image_bytes: bytes, max_size=(1536, 1536), quality=85
 ) -> bytes:
@@ -809,28 +674,6 @@ def _process_image_to_bytes(
             f"Image processing failed: {str(e)}. Falling back to original bytes."
         )
         return image_bytes
-
-
-def _download_media(access_token: str, media_token: str) -> bytes:
-    """
-    下载飞书云文档中的媒体文件（图片、附件等）。
-
-    Args:
-        access_token: 用户访问令牌。
-        media_token: 媒体文件 Token。
-
-    Returns:
-        bytes: 媒体文件的二进制内容。
-    """
-    url = f"{LARK_DOMAIN}/open-apis/drive/v1/medias/{media_token}/download"
-
-    response = _session.get(url, headers=_get_header(access_token), stream=True)
-    if response.status_code != 200:
-        logger.error(f"Download Media Error: {response.status_code} - {response.text}")
-    response.raise_for_status()
-    return response.content
-
-
 def _download_media_by_batch(
     access_token: str, media_token: str | list[str]
 ) -> dict[str, bytes]:
@@ -939,113 +782,6 @@ def _parse_block_text(block: dict) -> str:
                 content += f" ${e['equation'].get('content', '')}$ "
 
     return prefix + content + "\n" if content else ""
-
-
-def get_document_rich_text_by_word(
-    access_token: str, doc_token: str, doc_type: str = "docx", limit_media_num: int = 20
-) -> dict:
-    """
-    导出文档为 docx 格式并解析为富文本（支持图文交织）。
-
-    功能说明：
-    - 导出云文档为 Word (.docx) 并在内存中动态解压解析。
-    - 按照物理顺序提取文本和图片。
-    - 返回包含文本段落和图片 Part 对象的混合列表。
-
-    Args:
-        access_token: 用户访问令牌。
-        doc_token: 文档标识符。
-        doc_type: 文档原类型。
-        limit_media_num: 最大提取图片数量 (默认 20)。
-
-    Returns:
-        dict: 包含 'parts' (混合列表) 等。
-    """
-    content_bytes = _export_document(access_token, doc_token, doc_type, "docx")
-
-    part_list = []
-    images_metadata = []
-    image_count = 0
-
-    with zipfile.ZipFile(io.BytesIO(content_bytes)) as zf:
-        # 1. 解析关系文件映射 rId -> 路径
-        rels = {}
-        rels_path = "word/_rels/document.xml.rels"
-        if rels_path in zf.namelist():
-            rels_root = ET.fromstring(zf.read(rels_path))
-            for rel in rels_root:
-                rid = rel.get("Id")
-                target = rel.get("Target")
-                if rid and target:
-                    # Target 可能是 media/image1.png，需要补全路径
-                    if not target.startswith("word/"):
-                        target = f"word/{target}"
-                    rels[rid] = target
-
-        # 2. 解析主文档 XML
-        if "word/document.xml" in zf.namelist():
-            xml_content = zf.read("word/document.xml")
-            root = ET.fromstring(xml_content)
-
-            # 定义命名空间
-            ns = {
-                "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
-                "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-                "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
-                "wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
-                "pic": "http://schemas.openxmlformats.org/drawingml/2006/picture",
-            }
-
-            # 遍历所有段落
-            for p in root.findall(".//w:p", ns):
-                para_markdown = ""
-                # 在段落中寻找文本或图片
-                for elem in p.findall(".//*", ns):
-                    # 提取文本
-                    if elem.tag == f"{{{ns['w']}}}t" and elem.text:
-                        para_markdown += elem.text
-
-                    # 提取图片 (查找 blip 中的 rId)
-                    elif elem.tag == f"{{{ns['a']}}}blip":
-                        rid = elem.get(f"{{{ns['r']}}}embed")
-                        if rid and rid in rels and image_count < limit_media_num:
-                            img_path = rels[rid]
-                            if img_path in zf.namelist():
-                                img_data = zf.read(img_path)
-                                # 处理图片：转换为优化后的 bytes，不转 Base64
-                                img_bytes = _process_image_to_bytes(img_data)
-
-                                img_name = img_path.split("/")[-1]
-                                # 使用结构化字典返回，交给 Tool 层处理
-                                part_list.append(
-                                    {
-                                        "type": "image",
-                                        "name": img_name,
-                                        "data": img_bytes,
-                                        "mime_type": "image/jpeg",
-                                    }
-                                )
-
-                                images_metadata.append({"name": img_name, "token": rid})
-                                image_count += 1
-
-                                # 图片已作为独立 Part 添加，无需拼接到 para_markdown
-                                continue
-
-                if para_markdown.strip():
-                    part_list.append({"type": "text", "content": para_markdown})
-
-        # 统计总图片数 (即使超过 limit_media_num 也统计总数)
-        total_media = len([f for f in zf.namelist() if f.startswith("word/media/")])
-
-    return {
-        "parts": part_list,
-        "image_count": total_media,
-        "processed_image_count": image_count,
-        "images": images_metadata,
-    }
-
-
 def get_document_rich_text_by_block(
     access_token: str, doc_token: str, doc_type: str = "docx", limit_media_num: int = 20
 ) -> dict:
@@ -1137,7 +873,6 @@ def get_document_rich_text_by_block(
                     if token in downloaded_images:
                         img_data = downloaded_images[token]
                         img_bytes = _process_image_to_bytes(img_data)
-                        # img_bytes = _process_image_to_base64(img_data)
                         img_name = f"image_{token[:8]}.jpg"
 
                         part_list.append(
