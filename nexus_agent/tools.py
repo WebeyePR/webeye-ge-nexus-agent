@@ -2423,10 +2423,13 @@ async def feishu_mcp_create_doc(
         folder_token: Optional folder token.
         wiki_node: Optional wiki node token or URL.
         wiki_space: Optional wiki space ID, supports "my_library".
-        task_id: Optional async task ID for polling a previous create-doc request.
+    task_id: Optional async task ID for polling a previous create-doc request.
 
-    Returns:
-        dict: Structured result with status and doc fields.
+Returns:
+    dict: Structured result with status and doc fields. If an async task_id
+    is returned, immediately follow up with wait_for_feishu_doc_create_task_tool
+    (ADK long-running task: progress streams automatically; do NOT poll or
+    re-call this tool manually).
     """
     try:
         access_token = get_access_token(tool_context)
@@ -2750,10 +2753,12 @@ async def feishu_mcp_update_doc(
         selection_with_ellipsis: Optional content-based locator.
         selection_by_title: Optional heading-based locator.
         new_title: Optional new document title.
-        task_id: Optional async task ID for polling a previous update-doc request.
+    task_id: Optional async task ID for polling a previous update-doc request.
 
-    Returns:
-        dict: Success or error message.
+Returns:
+    dict: Success or error message. If an async task_id is returned, immediately
+    follow up with wait_for_feishu_doc_update_task_tool (ADK long-running task:
+    progress streams automatically; do NOT poll or re-call this tool manually).
     """
     try:
         access_token = get_access_token(tool_context)
