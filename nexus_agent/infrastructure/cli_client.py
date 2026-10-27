@@ -8,6 +8,31 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# CLI 输出体量护栏：大响应（如列出上百条文档/表格行）若全量返回，会灌爆 LLM
+# 上下文并显著抬高 token 成本。超限时截断并显式标注，由模型决定是否改走
+# page_size/page_token 分页细化——比静默截断或不截断都更可靠。
+MAX_OUTPUT_CHARS = 200_000
+_TRUNCATE_HEAD = 150_000
+_TRUNCATE_TAIL = 20_000
+
+
+def _truncate_output(text: str) -> tuple[str, bool]:
+    """截断超长 CLI 输出，保留首尾（头含结构、尾含汇总/游标）。
+
+    Returns:
+        (处理后的文本, 是否发生截断)
+    """
+    if len(text) <= MAX_OUTPUT_CHARS:
+        return text, False
+    omitted = len(text) - _TRUNCATE_HEAD - _TRUNCATE_TAIL
+    return (
+        text[:_TRUNCATE_HEAD]
+        + f"\n\n... [输出过长已截断，省略 {omitted} 字符。"
+        "如需完整数据，请用 page_size / page_token 等分页参数缩小查询范围] ...\n\n"
+        + text[-_TRUNCATE_TAIL:],
+        True,
+    )
+
 
 class PackagedCLIClient:
     """
@@ -45,6 +70,17 @@ class PackagedCLIClient:
         return None
 
     def _parse_stdout(self, stdout: str) -> dict[str, Any]:
+        stdout, truncated = _truncate_output(stdout)
+        if truncated:
+            logger.warning(
+                "CLI stdout exceeded %s chars; truncated with hint.", MAX_OUTPUT_CHARS
+            )
+        result = self._parse_stdout_raw(stdout)
+        if truncated:
+            result["truncated"] = True
+        return result
+
+    def _parse_stdout_raw(self, stdout: str) -> dict[str, Any]:
         stdout = stdout.strip()
         if not stdout:
             return {"status": "success", "data": None}

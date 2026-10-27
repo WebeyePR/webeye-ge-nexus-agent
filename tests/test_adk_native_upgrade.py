@@ -354,3 +354,39 @@ class TestRunConfigCallLimit:
             else:
                 os.environ["ADK_MAX_LLM_CALLS"] = old
             importlib.reload(rc)
+
+
+# ---------------------------------------------------------------------------
+# CLI 输出体量护栏（2026-10-27）：超大响应会灌爆 LLM 上下文并抬升 token 成本
+# ---------------------------------------------------------------------------
+
+class TestCliOutputGuard:
+    """CLI 输出必须有上限并给出分页提示，而非全量灌入上下文。"""
+
+    def test_small_output_untouched(self):
+        from nexus_agent.infrastructure.cli_client import CLIClient
+
+        result = CLIClient()._parse_stdout('{"ok": 1}')
+        assert result == {"status": "success", "data": {"ok": 1}}
+        assert "truncated" not in result
+
+    def test_oversized_output_truncated_with_hint(self):
+        from nexus_agent.infrastructure.cli_client import MAX_OUTPUT_CHARS, CLIClient
+
+        big = '{"items": [' + ",".join('{"a":%d}' % i for i in range(40_000)) + "]}"
+        assert len(big) > MAX_OUTPUT_CHARS, "构造的样本必须超过阈值，否则测不到截断"
+
+        result = CLIClient()._parse_stdout(big)
+        assert result["truncated"] is True
+        assert len(result["content"]) < MAX_OUTPUT_CHARS
+        assert "输出过长已截断" in result["content"]
+        assert "page_size" in result["content"], "截断提示必须给出分页指引"
+
+    def test_truncation_preserves_head_and_tail(self):
+        from nexus_agent.infrastructure.cli_client import _truncate_output
+
+        text = "HEAD_MARKER" + "x" * 300_000 + "TAIL_MARKER"
+        out, truncated = _truncate_output(text)
+        assert truncated is True
+        assert out.startswith("HEAD_MARKER"), "头部结构必须保留"
+        assert out.endswith("TAIL_MARKER"), "尾部游标/汇总必须保留"
