@@ -48,3 +48,8 @@ build/
 .deploy_env-show*
 .understand-anything/
 .pytest_tmp/
+
+# 本地平台专用 CLI 二进制（开发/测试用，由 scripts/fetch_local_binaries.sh 下载）
+# 部署用的 Linux 版本在 nexus_agent/bin/<name>，必须入库
+nexus_agent/bin/darwin-*/
+nexus_agent/bin/linux-arm64/

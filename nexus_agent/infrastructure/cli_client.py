@@ -1,9 +1,10 @@
-import os
-import subprocess
 import json
 import logging
-import tempfile
+import os
+import platform
 import shutil
+import subprocess
+import tempfile
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,21 @@ class PackagedCLIClient:
         self.bin_path = bin_path or self._resolve_bin_path(bin_name)
 
     def _resolve_bin_path(self, bin_name: str) -> str:
+        """解析二进制路径：平台专用优先，回退通用（Linux，随 wheel 部署）。
+
+        部署产物 bin/<name> 是 Linux x86-64（Agent Runtime 容器用）；本地开发
+        另放 bin/<os>-<arch>/<name>（如 darwin-arm64，gitignore 不入库），
+        由 scripts/fetch_local_binaries.sh 按官方 SHA-256 校验后落位。
+
+        2026-10-27 实测：仅用 bin/<name> 时，macOS 上执行为
+        `[Errno 8] Exec format error`——本地所有 CLI 测试实际只测到错误分支。
+        """
         package_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        local = os.path.join(
+            package_root, "bin", f"{platform.system().lower()}-{platform.machine().lower()}", bin_name
+        )
+        if os.path.exists(local):
+            return local
         return os.path.join(package_root, "bin", bin_name)
 
     def _ensure_executable(self) -> dict[str, Any] | None:
@@ -58,6 +73,22 @@ class PackagedCLIClient:
                 "message": (
                     f"CLI binary '{self.bin_name}' not found at {self.bin_path}. "
                     "Please download/build it and place it in the packaged bin/ directory."
+                ),
+            }
+
+        # 平台不匹配前置判定：bin/<name> 是 Linux x86-64（部署用）。在非 Linux
+        # 平台直接返回可读原因，避免下游抛 `[Errno 8] Exec format error`
+        # ——后者会让模型误判为权限/网络问题（2026-10-27 实测确认）。
+        if platform.system() != "Linux" and os.path.dirname(self.bin_path).endswith("bin"):
+            plat = f"{platform.system().lower()}-{platform.machine().lower()}"
+            return {
+                "status": "error",
+                "message": (
+                    f"{self.bin_name} 当前为 Linux x86-64 二进制（供 Agent Runtime 容器使用），"
+                    f"无法在 {platform.system()} 上执行。"
+                    f"本地真实测试请先运行 `bash scripts/fetch_local_binaries.sh` "
+                    f"下载 {plat} 版本到 nexus_agent/bin/{plat}/。"
+                    f"该限制不影响云端部署运行。"
                 ),
             }
 
@@ -104,14 +135,21 @@ class PackagedCLIClient:
         return {"status": "success", "content": stdout}
 
     def _format_args_for_log(self, args: list[str]) -> str:
+        # 脱敏名单：凡是承载「正文 / 请求体 / 业务数据」的 flag，其值一律不落日志。
+        # 2026-10-27 实测：--content（文档正文）此前未入名单，客户机密全文会以
+        # 明文写入服务端审计日志；--file 同理暴露本地路径与文件名。
         redacted_flags = {
             "--body",
+            "--content",      # 文档正文（长文本，最易泄漏）
             "--data",
             "--description",
+            "--file",         # 本地文件路径
+            "--image",
             "--json",
             "--json-values",
             "--markdown",
             "--params",
+            "--path",
             "--subject",
             "--text",
         }
