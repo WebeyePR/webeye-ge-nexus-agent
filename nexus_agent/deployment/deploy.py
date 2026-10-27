@@ -285,9 +285,47 @@ def _run_deploy() -> None:
             f"container_concurrency={container_concurrency}, resource_limits={resource_limits}"
         )
 
-        # env_vars 必须先过滤空值：proto 校验拒绝空字符串，
-        # 而 AGENT_THINKING_LEVEL 等可选开关默认就是空（表示不设置）。
-        env_vars = {k: v for k, v in env_vars.items() if v}
+        # env_vars 先构造再过滤空值：proto 校验拒绝空字符串，而
+        # AGENT_THINKING_LEVEL 等可选开关默认就是空（语义为"不设置"）。
+        _env_vars = {
+            "LARK_AUTH_ID": os.getenv("LARK_AUTH_ID"),
+            "LARK_DOMAIN": os.getenv("LARK_DOMAIN"),
+            "LARK_CLIENT_ID": os.getenv("LARK_CLIENT_ID"),
+            "GOOGLE_WORKSPACE_AUTH_ID": os.getenv("GOOGLE_WORKSPACE_AUTH_ID"),
+            "GOOGLE_WORKSPACE_PROJECT_ID": os.getenv(
+                "GOOGLE_WORKSPACE_PROJECT_ID", os.getenv("PROJECT_ID")
+            ),
+            # 工具硬确认开关（GE 确认事件流验证未过时置 0 回退，见验证清单 F5）
+            "AGENT_ENABLE_TOOL_CONFIRMATION": os.getenv(
+                "AGENT_ENABLE_TOOL_CONFIRMATION", "1"
+            ),
+            # 遥测/Tracing 官方开关（替代已弃用的 AdkApp enable_tracing 参数，
+            # false 与原 enable_tracing=False 语义等效：Tracing 真值表
+            # None+false→false）。默认关闭，需要时部署前设 env 为 true。
+            "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": os.getenv(
+                "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY", "false"
+            ),
+            # ADK 2.13 模型通道判定（旧 GOOGLE_GENAI_USE_VERTEXAI 已弃用）：
+            # 生产必须是 Vertex AI/Enterprise 模式。此处**硬编码为 1**，
+            # 不读本地 .env：本地开发常设 0（AI Studio 通道），若透传会把
+            # 生产引擎错误配成 AI Studio，导致无 API Key 时模型调用失败。
+            # 需要临时切 AI Studio 的极端场景请直接改这个字面量再部署。
+            "GOOGLE_GENAI_USE_ENTERPRISE": "1",
+            # 模型装配（与 nexus_agent/agent.py 读取逻辑一致，远程运行时
+            # 可配置）：主模型 + FallbackModel 跨模型故障转移链候选
+            "MODEL_NAME": os.getenv("MODEL_NAME", "gemini-3.8-flash"),
+            "AGENT_FALLBACK_MODELS": os.getenv(
+                "AGENT_FALLBACK_MODELS", "gemini-3.7-flash,gemini-3.6-flash"
+            ),
+            # 单次运行 LLM 调用上限（RunConfig.max_llm_calls 的 env 覆盖，
+            # ADK 默认 500）：防失控循环的护栏，200 对工具链场景余量充足
+            "ADK_MAX_LLM_CALLS": os.getenv("ADK_MAX_LLM_CALLS", "200"),
+            # 思考深度（延迟主导变量）。2026-10-27 实测：LOW 档在本项目
+            # 6 任务 × 2 轮 A/B 中 12/12 正确且快 45%~67%。留空 = 用模型
+            # 默认档；设为 MINIMAL/LOW/MEDIUM/HIGH 可切换。
+            "AGENT_THINKING_LEVEL": os.getenv("AGENT_THINKING_LEVEL", ""),
+        }
+        _env_vars = {k: v for k, v in _env_vars.items() if v}
 
         remote_app = agent_engines.create(
             agent_engine=app,
@@ -297,44 +335,7 @@ def _run_deploy() -> None:
             min_instances=min_instances,
             container_concurrency=container_concurrency,
             resource_limits=resource_limits,
-            env_vars={
-                "LARK_AUTH_ID": os.getenv("LARK_AUTH_ID"),
-                "LARK_DOMAIN": os.getenv("LARK_DOMAIN"),
-                "LARK_CLIENT_ID": os.getenv("LARK_CLIENT_ID"),
-                "GOOGLE_WORKSPACE_AUTH_ID": os.getenv("GOOGLE_WORKSPACE_AUTH_ID"),
-                "GOOGLE_WORKSPACE_PROJECT_ID": os.getenv(
-                    "GOOGLE_WORKSPACE_PROJECT_ID", os.getenv("PROJECT_ID")
-                ),
-                # 工具硬确认开关（GE 确认事件流验证未过时置 0 回退，见验证清单 F5）
-                "AGENT_ENABLE_TOOL_CONFIRMATION": os.getenv(
-                    "AGENT_ENABLE_TOOL_CONFIRMATION", "1"
-                ),
-                # 遥测/Tracing 官方开关（替代已弃用的 AdkApp enable_tracing 参数，
-                # false 与原 enable_tracing=False 语义等效：Tracing 真值表
-                # None+false→false）。默认关闭，需要时部署前设 env 为 true。
-                "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": os.getenv(
-                    "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY", "false"
-                ),
-                # ADK 2.13 模型通道判定（旧 GOOGLE_GENAI_USE_VERTEXAI 已弃用）：
-                # 生产必须是 Vertex AI/Enterprise 模式。此处**硬编码为 1**，
-                # 不读本地 .env：本地开发常设 0（AI Studio 通道），若透传会把
-                # 生产引擎错误配成 AI Studio，导致无 API Key 时模型调用失败。
-                # 需要临时切 AI Studio 的极端场景请直接改这个字面量再部署。
-                "GOOGLE_GENAI_USE_ENTERPRISE": "1",
-                # 模型装配（与 nexus_agent/agent.py 读取逻辑一致，远程运行时
-                # 可配置）：主模型 + FallbackModel 跨模型故障转移链候选
-                "MODEL_NAME": os.getenv("MODEL_NAME", "gemini-3.8-flash"),
-                "AGENT_FALLBACK_MODELS": os.getenv(
-                    "AGENT_FALLBACK_MODELS", "gemini-3.7-flash,gemini-3.6-flash"
-                ),
-                # 单次运行 LLM 调用上限（RunConfig.max_llm_calls 的 env 覆盖，
-                # ADK 默认 500）：防失控循环的护栏，200 对工具链场景余量充足
-                "ADK_MAX_LLM_CALLS": os.getenv("ADK_MAX_LLM_CALLS", "200"),
-                # 思考深度（延迟主导变量）。2026-10-27 实测：LOW 档在本项目
-                # 6 任务 × 2 轮 A/B 中 12/12 正确且快 45%~67%。留空 = 用模型
-                # 默认档；设为 MINIMAL/LOW/MEDIUM/HIGH 可切换。
-                "AGENT_THINKING_LEVEL": os.getenv("AGENT_THINKING_LEVEL", ""),
-            },
+            env_vars=_env_vars,
         )
     except FuturesTimeoutError:
         print(

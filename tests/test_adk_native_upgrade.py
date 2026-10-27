@@ -598,4 +598,4 @@ class TestThinkingLevelConfig:
         """空 env 必须被过滤（proto 拒绝空字符串）。"""
         with open("nexus_agent/deployment/deploy.py") as f:
             src = f.read()
-        assert 'env_vars = {k: v for k, v in env_vars.items() if v}' in src
+        assert '_env_vars = {k: v for k, v in _env_vars.items() if v}' in src
