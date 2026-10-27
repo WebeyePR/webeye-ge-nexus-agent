@@ -221,10 +221,11 @@ def _run_deploy() -> None:
                     "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY", "false"
                 ),
                 # ADK 2.13 模型通道判定（旧 GOOGLE_GENAI_USE_VERTEXAI 已弃用）：
-                # 生产为 Vertex AI/Enterprise 模式，显式声明避免歧义
-                "GOOGLE_GENAI_USE_ENTERPRISE": os.getenv(
-                    "GOOGLE_GENAI_USE_ENTERPRISE", "1"
-                ),
+                # 生产必须是 Vertex AI/Enterprise 模式。此处**硬编码为 1**，
+                # 不读本地 .env：本地开发常设 0（AI Studio 通道），若透传会把
+                # 生产引擎错误配成 AI Studio，导致无 API Key 时模型调用失败。
+                # 需要临时切 AI Studio 的极端场景请直接改这个字面量再部署。
+                "GOOGLE_GENAI_USE_ENTERPRISE": "1",
                 # 模型装配（与 nexus_agent/agent.py 读取逻辑一致，远程运行时
                 # 可配置）：主模型 + FallbackModel 跨模型故障转移链候选
                 "MODEL_NAME": os.getenv("MODEL_NAME", "gemini-3.8-flash"),
