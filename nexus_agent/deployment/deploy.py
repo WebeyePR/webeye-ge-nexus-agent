@@ -278,8 +278,14 @@ def _run_deploy() -> None:
         print(f"Deploying using pyproject.toml requirements: {requirements_source}")
 
         # 部署规格参数（治"慢"：消除冷启动排队与并发错配，官方 Optimize and scale 建议）
-        # min_instances：保持实例温热，避免冷启动（官方实测 ~4.7s vs 温启动 0.4s，上限 10）
-        min_instances = int(os.getenv("AGENT_MIN_INSTANCES", "1"))
+        # min_instances：默认 0（scale-to-zero，闲置不产生实例费用）。
+        # 代价（2026-10-27 实测，须知晓）：
+        #   - 空闲一段时间后首个请求触发冷启动，实测出现过 26s 首响应、
+        #     甚至 167s 的工具链静默（模型在等首个 token）；
+        #   - 预热后回落到 3~8s。
+        # 若某场景无法接受冷启动，部署前设 AGENT_MIN_INSTANCES=1 恢复常驻
+        # （官方实测冷启动 ~4.7s vs 温启动 0.4s，上限 10）。
+        min_instances = int(os.getenv("AGENT_MIN_INSTANCES", "0"))
         # container_concurrency：ADK 异步 Agent 官方建议设为 9 的倍数（如 36），
         # 高并发下最大延迟可从 ~60s 降至 ~7s；内存不足时调低并同时调小并发
         container_concurrency = int(os.getenv("AGENT_CONTAINER_CONCURRENCY", "36"))
