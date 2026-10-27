@@ -243,6 +243,16 @@ bash deploy.sh deploy
 
 ### 💻 本地运行与开发
 
+**0. 本地 CLI 二进制（首次必做）**:
+
+`nexus_agent/bin/` 下是 **Linux x86-64** 二进制，供 Agent Runtime 容器使用，在 macOS/Windows 上**无法执行**。本地要做真实 CLI 测试，先下载本平台版本：
+
+```bash
+bash scripts/fetch_local_binaries.sh    # 按平台下载，SHA-256 校验后落位
+```
+
+下载到 `nexus_agent/bin/<os>-<arch>/`（已 gitignore，不入库）。运行时按平台自动优先解析，未下载时会返回可读提示而非 `Exec format error`。
+
 **1. 本地 CLI 运行**:
 
 本地运行会启动命令行交互。涉及飞书写操作或用户态读取时，工具会从运行上下文读取 Gemini Enterprise OAuth 注入的 access token；如需本地验证单个工具，建议直接编写测试或临时脚本传入 access token，不要修改 `tools.py` 中的授权读取逻辑。
