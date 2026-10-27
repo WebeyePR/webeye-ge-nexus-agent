@@ -1522,7 +1522,11 @@ async def execute_lark_cli(
     [Registry-Backed Executor] 传入序列化的飞书参数数组，调用高度隔离且自带干跑保护机制的飞书通用命令行执行器。
 
     Args:
-        args_json: 飞书命令行参数的 JSON 格式字符串数组，例如：["drive", "file", "list", "--params", "{\\"pageSize\\": 10}"]
+        args_json: 飞书命令行参数的 JSON 格式字符串数组。argv 必须来自
+            get_lark_command_spec 的 argv 字段（如 ["drive", "+search"]），
+            不要凭想象拼层级：lark-cli 的子命令是 `+shortcut` 或
+            `resource.method`（点号连接），`drive file list` 这类空格分层
+            会报 unknown subcommand。
         tool_context: 工具执行上下文，包含飞书用户 OAuth 的 access_token。
         dry_run: 默认安全使能（True）。如果判断为写突变操作且缺失 '--dry-run'，会自动补全。
         allow_mutating: 默认不使能（False）。突变修改类操作不加 '--dry-run' 时，此项必须声明为 True。

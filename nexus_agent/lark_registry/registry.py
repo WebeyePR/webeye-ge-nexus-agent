@@ -12,6 +12,32 @@ import re
 from importlib import resources
 from typing import Any
 
+# 中文查询词 → 英文检索词扩展（2026-10-27 实测：注册表描述以英文为主
+# —— 400 条抽样中 331 条纯英文、69 条含中文。用户用中文提问时若不扩展，
+# discover 命中 0 条（中文 token 与英文描述无交集）。
+# 只在**查询侧**扩展，不改动分词器（分词器同时用于 spec 索引，改动会污染召回）。
+# 覆盖高频办公意图，不做全量词典——生僻词由模型自行翻译为英文更可靠。
+_ZH_QUERY_EXPAND = {
+    "日历": "calendar", "日程": "calendar event", "会议": "meeting vc",
+    "文档": "document doc docs", "表格": "sheet spreadsheet", "多维表格": "bitable base",
+    "消息": "message", "发送": "send", "群聊": "chat group", "群": "chat",
+    "文件": "file drive", "文件夹": "folder", "云盘": "drive",
+    "搜索": "search", "查找": "search", "查询": "search get list",
+    "创建": "create", "新建": "create", "删除": "delete",
+    "更新": "update", "修改": "update", "追加": "append",
+    "列表": "list", "下载": "download", "上传": "upload",
+    "任务": "task", "邮件": "mail email", "知识库": "wiki",
+    "审批": "approval", "通讯录": "contact", "权限": "permission",
+    "评论": "comment", "回复": "reply", "附件": "file media",
+    "幻灯片": "slides", "白板": "whiteboard", "签到": "attendance",
+}
+
+
+def _expand_zh_query(query: str) -> str:
+    """把查询中的中文意图词并联追加其英文对应词（保留原查询不动）。"""
+    extra = [en for zh, en in _ZH_QUERY_EXPAND.items() if zh in query]
+    return f"{query} {' '.join(extra)}" if extra else query
+
 
 class CLICommandRegistry:
     """
@@ -129,8 +155,10 @@ class CLICommandRegistry:
             limit: 返回结果的最大数目
         """
         resource_parts = resource_parts or []
-        # 合并多源检索上下文分词
-        query_tokens = self._tokenize(" ".join([query, intent, " ".join(resource_parts)]))
+        # 合并多源检索上下文分词；中文查询先扩展为英文检索词
+        query_tokens = self._tokenize(
+            _expand_zh_query(" ".join([query, intent, " ".join(resource_parts)]))
+        )
         service_name = (service or "").strip().lower()
         scored = []
 

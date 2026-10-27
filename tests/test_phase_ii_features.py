@@ -413,7 +413,10 @@ def test_cli_error_handling_and_non_zero_exit(monkeypatch):
     def mock_subprocess_run(full_args, env=None, capture_output=True, text=True, check=False, timeout=120):
         return MockCompletedProcess()
 
-    monkeypatch.setattr(os, "path", MagicMock(exists=lambda p: True))  # 让 bin_path 检查通过
+    # 只替换需要放行的判定函数，不整体替换 os.path——整体替换会把
+    # MagicMock 泄漏给 pytest 自身（pytest 内部用 os.path.commonpath，
+    # 会抛 ValueError 变成 INTERNALERROR）。
+    monkeypatch.setattr(os.path, "exists", lambda p: True)
     monkeypatch.setattr(os, "access", lambda p, mode: True)
     monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
 
