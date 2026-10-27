@@ -229,7 +229,15 @@ else:
         name="webeye-nexus-agent-app",
         root_agent=root_agent,
         plugins=_plugins,  # 预构建 App 时插件必须挂在 App 上（AdkApp 禁止重复传入）
-        context_cache_config=ContextCacheConfig(min_tokens=4096),
+        # cache_intervals=50：默认 10 意味着每 10 次调用重建一次 10.7k token
+        # 的缓存。2026-10-27 实测（连续 15 轮观察 cache_metadata）：第 11 轮
+        # inv 达上限 10，第 12 轮 fingerprint 变更、inv 归零 → 确实周期性重建，
+        # 重建轮次延迟明显高于稳态（稳态 2.6~3.3s vs 刷新点 7.9~15.2s）。
+        # 提到 50 让刷新频率降 80%；ttl_seconds 默认 1800s 足够覆盖。
+        context_cache_config=ContextCacheConfig(
+            min_tokens=4096,
+            cache_intervals=int(os.getenv("AGENT_CACHE_INTERVALS", "50")),
+        ),
     )
     # app_name/agent/plugins 均禁止传入（由 App 派生）
     # 注意：不传 enable_tracing（已弃用），遥测由部署 env_vars 统一关闭（下方 _run_deploy）

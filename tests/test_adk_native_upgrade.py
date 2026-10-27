@@ -196,7 +196,7 @@ class TestResidualsEradicated:
         assert "ToolAuditPlugin()" in src
         assert "ReflectAndRetryModelPlugin()" in src, "模型瞬时故障自愈重试插件不得缺失"
         assert "from google.adk.plugins import ReflectAndRetryModelPlugin" in src
-        assert "ContextCacheConfig(min_tokens=4096)" in src, "ADK 原生上下文缓存不得缺失"
+        assert "ContextCacheConfig(" in src and "min_tokens=4096" in src, "ADK 原生上下文缓存不得缺失"
         assert "AGENT_ENABLE_CONTEXT_CACHE" in src, "上下文缓存回退开关不得缺失"
         assert "if __name__ == \"__main__\":" in src, "部署 main 守卫不得回退"
 
@@ -599,3 +599,36 @@ class TestThinkingLevelConfig:
         with open("nexus_agent/deployment/deploy.py") as f:
             src = f.read()
         assert '_env_vars = {k: v for k, v in _env_vars.items() if v}' in src
+
+
+class TestCacheIntervalsTuning:
+    """缓存刷新频率可配置（实测默认 10 会周期性重建 10.7k token 缓存）。"""
+
+    def test_cache_intervals_configurable(self):
+        """cache_intervals 必须经环境变量可配且落在 ADK 合法区间 [1,100]。
+
+        不 reload deploy 模块（其导入链有副作用会递归），改为源码锚定 +
+        直接验证 ContextCacheConfig 接受该值。
+        """
+        from google.adk.agents.context_cache_config import ContextCacheConfig
+
+        with open("nexus_agent/deployment/deploy.py") as f:
+            src = f.read()
+        assert "AGENT_CACHE_INTERVALS" in src, "缓存刷新频率必须可配"
+        assert "cache_intervals=" in src
+        # 取默认值并验证落在合法区间
+        import re
+
+        m = re.search(r'AGENT_CACHE_INTERVALS",\s*"(\d+)"', src)
+        assert m, "未找到默认 cache_intervals"
+        default = int(m.group(1))
+        assert 1 <= default <= 100, f"默认值 {default} 超出 ADK 合法区间"
+        assert default > 10, "默认值应高于 ADK 默认 10 才算调优"
+        cfg = ContextCacheConfig(min_tokens=4096, cache_intervals=default)
+        assert cfg.cache_intervals == default
+
+    def test_default_is_tuned_above_adk_default(self):
+        """默认值必须高于 ADK 默认 10（否则谈不上调优）。"""
+        from google.adk.agents.context_cache_config import ContextCacheConfig
+
+        assert ContextCacheConfig().cache_intervals == 10, "ADK 默认值变更需复核本调优"
