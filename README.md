@@ -239,6 +239,17 @@ bash deploy.sh deploy
 *部署完成后，控制台会输出直接访问 Gemini Enterprise 和 Vertex AI 的快捷链接。*
 *多环境：`bash deploy.sh deploy staging` 使用 `.env-staging`；旧用法 `bash deploy.sh staging` 仍然兼容。*
 
+**部署后的性能调优开关**（按需覆盖，均有默认值）：
+
+| 环境变量 | 默认 | 作用与代价 |
+|---|---|---|
+| `AGENT_THINKING_LEVEL` | `LOW` | 思考深度。实测 LOW 档比模型默认档快 45%~67%，工具选择正确率更高（12/12 vs 10/12）。需更高推理深度可设 `MEDIUM`/`HIGH` |
+| `AGENT_MIN_INSTANCES` | `0` | 0=scale-to-zero，闲置不计实例费用。**代价**：空闲后首个请求需冷启动，实测 5 次采样为 5.0/5.6/8.4/23.1/48.8s（中位 8.4s），偶发过 130s 级长尾；无法接受冷启动时设 `1` 常驻 |
+| `AGENT_CACHE_INTERVALS` | `50` | 上下文缓存复用次数。ADK 默认 10 会每 10 次调用重建 10.7k token 缓存（实测刷新点延迟 7.9~15.2s，稳态仅 2.6~3.3s） |
+| `ADK_MAX_LLM_CALLS` | `200` | 单次运行模型调用上限，防失控循环 |
+
+> 冷启动长尾是 `min_instances=0` 的固有代价，若面向真实用户且体验优先，建议改回 `AGENT_MIN_INSTANCES=1`（实例费用与体验的权衡，非技术缺陷）。
+
 ---
 
 ### 💻 本地运行与开发
