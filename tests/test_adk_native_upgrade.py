@@ -390,3 +390,157 @@ class TestCliOutputGuard:
         assert truncated is True
         assert out.startswith("HEAD_MARKER"), "头部结构必须保留"
         assert out.endswith("TAIL_MARKER"), "尾部游标/汇总必须保留"
+
+
+# ---------------------------------------------------------------------------
+# 部署守卫（2026-10-27）：源码树来源 + 序列化产物
+# 事故本质：脚本方式运行时 import 命中 venv 陈旧副本，旧代码被上传且无报错。
+# 实测差异：源码 model 是 FallbackModel 链，旧副本退化为 str。
+# ---------------------------------------------------------------------------
+
+class TestDeployGuards:
+    """部署前双守卫必须存在且能拦截污染。"""
+
+    def test_root_dir_inserted_at_sys_path_front(self):
+        """deploy 模块导入后，项目根必须在 sys.path 首位（覆盖脚本目录）。"""
+        import os
+        import sys
+
+        import nexus_agent.deployment.deploy  # noqa: F401
+
+        root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(nexus_agent.deployment.deploy.__file__)))
+        )
+        assert sys.path[0] == root, f"sys.path[0]={sys.path[0]}，项目根未置于首位"
+
+    def test_verify_source_tree_rejects_site_packages(self):
+        """site-packages 路径必须被拦截（污染的唯一特征）。"""
+        import nexus_agent
+        import pytest
+
+        from nexus_agent.deployment import deploy as D
+
+        orig = nexus_agent.__file__
+        try:
+            nexus_agent.__file__ = "/x/.venv/lib/python3.14/site-packages/nexus_agent/__init__.py"
+            with pytest.raises(RuntimeError) as exc:
+                D.verify_source_tree()
+            assert "部署中止" in str(exc.value)
+        finally:
+            nexus_agent.__file__ = orig
+
+    def test_verify_source_tree_passes_current(self):
+        """当前源码树必须放行。"""
+        from nexus_agent.deployment import deploy as D
+
+        D.verify_source_tree()  # 不抛即通过
+
+    def test_verify_serialization_passes_current_app(self):
+        """当前 App 序列化产物必须无 _impl 类动态符号。"""
+        from nexus_agent.deployment import deploy as D
+
+        D.verify_serialization(D.app)  # 不抛即通过
+
+    def test_guards_wired_into_run_deploy(self):
+        """守卫必须真正接入部署流程，不能只定义不调用。"""
+        with open("nexus_agent/deployment/deploy.py") as f:
+            src = f.read()
+        # _run_deploy 体内三处调用缺一不可
+        idx = src.index("def _run_deploy")
+        body = src[idx:]
+        assert "ensure_project_root_on_path()" in body
+        assert "verify_source_tree()" in body
+        assert "verify_serialization(app)" in body
+
+
+class TestCliPlatformResolution:
+    """CLI 二进制平台解析与友好报错。"""
+
+    def test_platform_dir_takes_precedence(self):
+        """bin/<os>-<arch>/ 存在时必须优先于 bin/ 下的 Linux 版本。"""
+        import os
+        import platform
+
+        from nexus_agent.infrastructure.cli_client import CLIClient
+
+        pkg_root = os.path.dirname(os.path.dirname(os.path.abspath(CLIClient.__module__.replace(".", "/"))))
+        plat = f"{platform.system().lower()}-{platform.machine().lower()}"
+        local = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "nexus_agent", "bin", plat, "lark-cli",
+        )
+        path = CLIClient().bin_path
+        if os.path.exists(local):
+            assert path.endswith(os.path.join(plat, "lark-cli")), f"未优先平台目录: {path}"
+
+    def test_non_linux_gets_readable_error(self):
+        """非 Linux 平台执行 Linux 二进制必须返回可读原因，不是 Errno 8。"""
+        import platform
+        import sys
+
+        import pytest
+
+        from nexus_agent.infrastructure.cli_client import CLIClient
+
+        c = CLIClient()
+        # 若已装本地平台二进制则跳过（此时真能执行）
+        if not c.bin_path.endswith("bin/lark-cli"):
+            pytest.skip("已存在本地平台二进制，不适用")
+        if platform.system() == "Linux":
+            pytest.skip("Linux 平台可直接执行")
+
+        res = c.run_command(["drive", "file", "list"], access_token="x", client_id="y")
+        assert res["status"] == "error"
+        assert "Exec format error" not in res["message"]
+        assert "Linux x86-64" in res["message"]
+        assert "fetch_local_binaries.sh" in res["message"]
+
+
+class TestCliLogRedaction:
+    """敏感 flag 脱敏（2026-10-27 实测 --content 曾明文泄漏）。"""
+
+    def test_content_flag_redacted(self):
+        from nexus_agent.infrastructure.cli_client import CLIClient
+
+        out = CLIClient()._format_args_for_log(
+            ["docs", "+create", "--title", "T", "--content", "CLIENT_CONFIDENTIAL_BODY"]
+        )
+        assert "CLIENT_CONFIDENTIAL_BODY" not in out
+        assert "--content <redacted>" in out
+
+    def test_file_path_redacted(self):
+        from nexus_agent.infrastructure.cli_client import CLIClient
+
+        out = CLIClient()._format_args_for_log(["drive", "+upload", "--file", "/secret/path.pdf"])
+        assert "/secret/path.pdf" not in out
+
+    def test_harmless_flags_preserved(self):
+        from nexus_agent.infrastructure.cli_client import CLIClient
+
+        out = CLIClient()._format_args_for_log(["docs", "+create", "--title", "Visible Title"])
+        assert "Visible Title" in out
+
+
+class TestChineseQueryExpansion:
+    """中文查询扩展（实测：扩展前中文命中 0 条）。"""
+
+    def test_chinese_query_finds_commands(self):
+        from nexus_agent.tools import discover_lark_operations
+
+        for q in ("创建日历日程", "搜索文档", "发送消息"):
+            res = discover_lark_operations(query=q)
+            assert res.get("matches"), f"中文查询 {q!r} 命中 0 条"
+
+    def test_english_query_unaffected(self):
+        from nexus_agent.tools import discover_lark_operations
+
+        res = discover_lark_operations(query="create calendar event")
+        assert res.get("matches")
+        assert "calendar" in res["matches"][0]["command_id"].lower()
+
+    def test_expansion_does_not_pollute_tokenizer(self):
+        """扩展只在查询侧，不得改变 spec 分词（否则污染召回）。"""
+        from nexus_agent.lark_registry.registry import _expand_zh_query
+
+        assert _expand_zh_query("日历") == "日历 calendar"
+        assert _expand_zh_query("calendar") == "calendar"

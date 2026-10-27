@@ -1,4 +1,16 @@
+import os
 import sys
+
+# --- 源码树路径注入（必须在任何 nexus_agent 导入之前）------------------------
+# 脚本方式运行（python nexus_agent/deployment/deploy.py）时 sys.path[0] 是
+# deployment 目录，项目根不在其中；此时 import nexus_agent 会命中 .venv 里
+# 由 `uv sync --no-editable` 生成的陈旧安装副本，导致部署上传旧代码且无报错。
+# 实测：旧副本的 model 是 str，源码是 FallbackModel 链——降级能力静默消失。
+# 因此这里先算项目根（__file__ 上溯两级）并置于 sys.path 首位，再做导入。
+_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if not sys.path or sys.path[0] != _ROOT_DIR:
+    sys.path.insert(0, _ROOT_DIR)
+
 # 运行时重定向补丁，在包加载瞬间，建立 lark_agent 到 nexus_agent 的软重定向
 try:
     import lark_agent  # noqa: F401  有意保留：旧包名兼容 shim
@@ -6,7 +18,6 @@ except ImportError:
     import nexus_agent
     sys.modules['lark_agent'] = nexus_agent
 
-import os
 import socket
 import tomllib
 from concurrent.futures import TimeoutError as FuturesTimeoutError
@@ -38,7 +49,8 @@ AGENT_WHL_FILE_NAME = "ge_nexus_agent-1.0.0-py3-none-any.whl"
 AGENT_WHL_FILE = os.path.join(CURRENT_DIR, AGENT_WHL_FILE_NAME)
 
 # 专门用于存储部署过程中自动生成的参数，优先使用环境变量指定的绝对路径
-ROOT_DIR = os.path.dirname(os.path.dirname(CURRENT_DIR))
+# ROOT_DIR 已在上方（导入区）定义，此处复用，避免两处定义漂移
+ROOT_DIR = _ROOT_DIR
 DEPLOY_ENV_FILE = os.getenv("DEPLOY_ENV_FILE", os.path.join(ROOT_DIR, ".deploy_env"))
 PYPROJECT_FILE = os.path.join(ROOT_DIR, "pyproject.toml")
 
@@ -54,6 +66,79 @@ def load_project_requirements(pyproject_file: str) -> list[str]:
     if not deps:
         raise ValueError(f"No project.dependencies found in {pyproject_file}")
     return deps
+
+
+def ensure_project_root_on_path() -> None:
+    """把项目根置于 sys.path 首位，保证脚本方式运行也能解析到源码树。
+
+    2026-10-27 实测事故路径：`python nexus_agent/deployment/deploy.py` 的
+    sys.path[0] 是 nexus_agent/deployment，项目根不在路径中。此时
+    `import nexus_agent` 会解析到 .venv/…/site-packages 下的**陈旧安装副本**
+    （deploy.sh 的 `uv sync --no-editable` 会生成该副本）。实测差异：
+    源码 model 是 FallbackModel 链，旧副本 model 退化为 str——部署出去
+    FallbackModel 静默消失，且全程零报错。
+
+    幂等：已在首位则不重复插入。
+    """
+    root = ROOT_DIR
+    if not sys.path or sys.path[0] != root:
+        # 先移除历史位置，避免重复累积
+        sys.path[:] = [p for p in sys.path if p != root]
+        sys.path.insert(0, root)
+
+
+def verify_source_tree() -> None:
+    """部署前守卫：拦截「导入到 site-packages 陈旧副本」的部署。
+
+    不拦的后果是静默的——远程容器拿到旧代码，功能缺失但无任何报错。
+    """
+    import nexus_agent
+
+    pkg_file = os.path.realpath(nexus_agent.__file__)
+    expected = os.path.join(ROOT_DIR, "nexus_agent")
+    if "site-packages" in pkg_file or "dist-packages" in pkg_file:
+        raise RuntimeError(
+            "部署中止：nexus_agent 解析到了已安装副本，而非项目源码树\n"
+            f"  实际路径: {pkg_file}\n"
+            f"  期望根目录: {expected}\n"
+            "  处置：删除 .venv/lib/python*/site-packages/nexus_agent 与 "
+            "ge_nexus_agent-*.dist-info（陈旧副本），或改用 "
+            "`uv run --no-sync python nexus_agent/deployment/deploy.py`。"
+        )
+    print(f"Source tree verified: {pkg_file}")
+
+
+def verify_serialization(app) -> None:
+    """部署前守卫：扫描序列化产物，拦截远程必然失败的动态符号。
+
+    cloudpickle 对「模块中按名取不到的函数」会退化为 STACK_GLOBAL 名字引用，
+    远程进程若无该名字即反序列化失败。2026-10-27 实测本项目当前产物健康
+    （55 个符号全部可达），此守卫为防回归而设，非修既有 bug。
+    """
+    import pickletools
+
+    import cloudpickle
+
+    blob = cloudpickle.dumps(app)
+    bad: set[str] = set()
+    pending: list[str] = []
+    for op, arg, _ in pickletools.genops(blob):
+        if op.name in ("SHORT_BINUNICODE", "BINUNICODE") and isinstance(arg, str):
+            pending.append(arg)
+            if len(pending) > 2:
+                pending.pop(0)
+        elif op.name == "STACK_GLOBAL" and len(pending) >= 2:
+            module, name = pending[-2], pending[-1]
+            # 按名解析的内部实现符号（_xxx_impl）是历史事故特征
+            if name.startswith("_") and "_impl" in name:
+                bad.add(f"{module}.{name}")
+    if bad:
+        raise RuntimeError(
+            "部署中止：序列化产物含按名解析的动态符号，远程必然反序列化失败\n"
+            f"  可疑符号: {sorted(bad)}\n"
+            "  处置：确认工具函数在模块级有公开绑定（不要只包装内部实现名）。"
+        )
+    print(f"Serialization verified: {len(blob) / 1024:.1f} KB, symbols OK")
 
 # 增加全局网络超时时间，处理大包上传（如 lark-cli 二进制文件）
 socket.setdefaulttimeout(1800)  # 设置为 10 分钟
@@ -154,6 +239,12 @@ else:
 
 def _run_deploy() -> None:
     """执行真实部署。仅在本模块作为脚本运行时触发（防 import 副作用误部署）。"""
+
+    # 部署前守卫（2026-10-27）：源码树来源 + 序列化产物。
+    # 二者都对应「本地全绿、远程静默失败」类事故，必须在真正上传前拦截。
+    ensure_project_root_on_path()
+    verify_source_tree()
+    verify_serialization(app)
 
     # 打印文件大小供调试
     if os.path.exists(AGENT_WHL_FILE):
