@@ -3,6 +3,14 @@
 # ==============================================================================
 # Lark Agent 一键部署脚本 (Using UV and Google Cloud CLI)
 # ==============================================================================
+# 两种运行模式（参照 kerun_ai_web/scripts/deploy-gcp.sh 的职责边界）：
+#   bash deploy.sh                 只读校验（默认）——检查环境/配置/API/二进制/
+#                                  构建工具/凭证，输出就绪度报告，不做任何变更
+#   bash deploy.sh deploy [suffix] 真实部署（可选环境后缀 .env-<suffix>）
+#
+# 兼容旧用法：首个参数不是 validate/deploy 时按环境后缀处理并执行真实部署，
+# 避免既有工作流（bash deploy.sh <suffix>）失效。
+# ==============================================================================
 
 # 设置错误即停止
 set -e
@@ -14,8 +22,32 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# 1. 检查环境与配置
-ENV_SUFFIX="$1"
+# 1. 解析模式参数
+MODE="validate"
+ENV_SUFFIX=""
+case "${1:-}" in
+    deploy)   MODE="deploy";     ENV_SUFFIX="${2:-}" ;;
+    validate) MODE="validate";   ENV_SUFFIX="${2:-}" ;;
+    -h|--help|help) MODE="help" ;;
+    "")       MODE="validate" ;;
+    *)        MODE="deploy";     ENV_SUFFIX="$1" ;;   # 旧用法：首参即环境后缀
+esac
+
+if [ "$MODE" = "help" ]; then
+    echo "WebEye Nexus Agent 部署脚本"
+    echo ""
+    echo "用法："
+    echo "  bash deploy.sh                  只读校验（默认，不部署，输出就绪度报告）"
+    echo "  bash deploy.sh validate         同上"
+    echo "  bash deploy.sh deploy           真实部署（幂等）"
+    echo "  bash deploy.sh deploy staging   用 .env-staging 部署"
+    echo "  bash deploy.sh staging          旧用法等价于 deploy staging"
+    echo ""
+    echo "校验模式检查项：环境配置文件、必填变量、gcloud/uv 工具、ADC 凭证、"
+    echo "所需 API、CLI 二进制、GCS staging bucket、GE 应用可达性。"
+    exit 0
+fi
+
 TARGET_ENV=".env"
 if [ -n "$ENV_SUFFIX" ]; then
     TARGET_ENV=".env-${ENV_SUFFIX}"
@@ -47,18 +79,131 @@ if [ -n "$GOOGLE_WORKSPACE_AUTH_ID" ]; then
 echo -e "- GWS 授权 ID (GWS_AUTH_ID): ${GREEN}${GOOGLE_WORKSPACE_AUTH_ID}${NC}"
 fi
 if [ -n "$GE_AGENT_RESOURCE_NAME" ]; then
-echo -e "- 部署模式:                ${YELLOW}更新部署 (Update Agent Engine)${NC}"
+echo -e "- 预计部署类型:            ${YELLOW}更新部署 (Update Agent Engine)${NC}"
 echo -e "- 已注册 GE Agent 资源:     ${YELLOW}${GE_AGENT_RESOURCE_NAME}${NC}"
 else
-echo -e "- 部署模式:                ${GREEN}首次部署 (Register New Agent)${NC}"
+echo -e "- 预计部署类型:            ${GREEN}首次部署 (Register New Agent)${NC}"
 fi
 echo -e "=================================================================="
-echo -e "请在 5 秒内确认以上信息是否正确，按 ${RED}Ctrl+C${NC} 可安全取消部署..."
-for i in {5..1}; do
-    echo -ne "倒计时: ${YELLOW}$i${NC} 秒...\r"
-    sleep 1
-done
+if [ "$MODE" = "validate" ]; then
+    echo -e "模式: ${BLUE}只读校验${NC}（不会产生任何云端变更）"
+else
+    echo -e "模式: ${RED}真实部署${NC}"
+    echo -e "请在 5 秒内确认以上信息是否正确，按 ${RED}Ctrl+C${NC} 可安全取消部署..."
+    for i in {5..1}; do
+        echo -ne "倒计时: ${YELLOW}$i${NC} 秒...\r"
+        sleep 1
+    done
+fi
 echo -e "\n==================================================================\n"
+
+# ------------------------------------------------------------------------------
+# 只读校验（MODE=validate）：把所有前置条件检查完，输出就绪度报告后退出。
+# 关键纪律：本段只做 describe/list/get，绝不 enable/create/add-iam-policy-binding。
+# ------------------------------------------------------------------------------
+if [ "$MODE" = "validate" ]; then
+    VALIDATE_ERRORS=0
+    VALIDATE_WARNS=0
+    v_ok()   { echo -e "  ${GREEN}✓${NC} $1"; }
+    v_warn() { echo -e "  ${YELLOW}!${NC} $1"; VALIDATE_WARNS=$((VALIDATE_WARNS+1)); }
+    v_fail() { echo -e "  ${RED}✗${NC} $1"; VALIDATE_ERRORS=$((VALIDATE_ERRORS+1)); }
+
+    echo -e "${BLUE}[1/7] 工具链${NC}"
+    if command -v gcloud >/dev/null 2>&1; then
+        v_ok "gcloud: $(gcloud version 2>/dev/null | head -1)"
+    else
+        v_fail "gcloud 未安装"
+    fi
+    if command -v uv >/dev/null 2>&1; then
+        v_ok "uv: $(uv --version 2>/dev/null)"
+    else
+        v_fail "uv 未安装（https://docs.astral.sh/uv/）"
+    fi
+
+    echo -e "\n${BLUE}[2/7] 必填配置项${NC}"
+    for var_name in PROJECT_ID LOCATION STAGING_BUCKET AGENT_DISPLAY_NAME GE_APP_ID GE_APP_LOCATION LARK_AUTH_ID LARK_CLIENT_ID; do
+        var_val="${!var_name}"
+        if [ -n "$var_val" ]; then
+            v_ok "${var_name}"
+        else
+            v_fail "${var_name} 未设置"
+        fi
+    done
+    if [ -n "$GOOGLE_WORKSPACE_AUTH_ID" ]; then
+        v_ok "GOOGLE_WORKSPACE_AUTH_ID"
+    else
+        v_warn "GOOGLE_WORKSPACE_AUTH_ID 未设置（GWS 工具无法完成授权）"
+    fi
+
+    echo -e "\n${BLUE}[3/7] GCP 项目可达性${NC}"
+    if gcloud projects describe "$PROJECT_ID" --format='value(projectId)' >/dev/null 2>&1; then
+        v_ok "项目可访问: $PROJECT_ID"
+    else
+        v_fail "无法访问项目 $PROJECT_ID（检查凭证与权限）"
+    fi
+
+    echo -e "\n${BLUE}[4/7] ADC 凭证${NC}"
+    if gcloud auth application-default print-access-token >/dev/null 2>&1; then
+        v_ok "ADC 有效"
+    else
+        v_fail "ADC 无效，请运行 gcloud auth application-default login"
+    fi
+
+    echo -e "\n${BLUE}[5/7] 所需 API${NC}"
+    ENABLED_APIS="$(gcloud services list --enabled --project "$PROJECT_ID" \
+        --format='value(config.name)' 2>/dev/null || true)"
+    for api in aiplatform.googleapis.com storage.googleapis.com \
+               discoveryengine.googleapis.com iam.googleapis.com; do
+        if grep -Fxq "$api" <<<"$ENABLED_APIS"; then
+            v_ok "$api"
+        else
+            v_fail "$api 未启用（deploy 前需启用）"
+        fi
+    done
+
+    echo -e "\n${BLUE}[6/7] CLI 二进制${NC}"
+    if [ -f "nexus_agent/bin/lark-cli" ]; then
+        size_mb=$(( $(wc -c < "nexus_agent/bin/lark-cli") / 1024 / 1024 ))
+        v_ok "lark-cli（${size_mb}MB）"
+    else
+        v_fail "nexus_agent/bin/lark-cli 缺失（deploy 时会尝试构建）"
+    fi
+    if [ -f "nexus_agent/bin/gws" ]; then
+        size_mb=$(( $(wc -c < "nexus_agent/bin/gws") / 1024 / 1024 ))
+        v_ok "gws（${size_mb}MB）"
+    else
+        v_fail "nexus_agent/bin/gws 缺失（需从 googleworkspace/cli release 下载）"
+    fi
+
+    echo -e "\n${BLUE}[7/7] 存储与 GE 应用${NC}"
+    if gcloud storage buckets describe "$STAGING_BUCKET" \
+        --project "$PROJECT_ID" --format='value(name)' >/dev/null 2>&1; then
+        v_ok "staging bucket 存在: $STAGING_BUCKET"
+    else
+        v_fail "staging bucket 不可访问: $STAGING_BUCKET"
+    fi
+    if [ -n "$GE_APP_ID" ]; then
+        # 只读探测 GE 应用（失败不算致命：GE 侧权限可能独立于部署权限）
+        if gcloud alpha discovery-engine engines describe "$GE_APP_ID" \
+            --project "$PROJECT_ID" --location "$GE_APP_LOCATION" >/dev/null 2>&1; then
+            v_ok "GE 应用可访问: $GE_APP_ID"
+        else
+            v_warn "GE 应用探测未通过（可能是权限或 gcloud alpha 组件缺失，不阻塞部署）"
+        fi
+    fi
+
+    echo ""
+    echo -e "=================================================================="
+    if [ "$VALIDATE_ERRORS" -eq 0 ]; then
+        echo -e "${GREEN}校验通过${NC}：0 错误，${VALIDATE_WARNS} 警告。未执行任何变更。"
+        echo -e "确认后执行：${BLUE}bash deploy.sh deploy${NC}"
+        exit 0
+    else
+        echo -e "${RED}校验未通过${NC}：${VALIDATE_ERRORS} 错误，${VALIDATE_WARNS} 警告。"
+        echo -e "请先解决上述错误项再部署。"
+        exit 1
+    fi
+fi
 
 # 保存旧的 Reasoning Engine 资源名称以供后续清理
 PREVIOUS_REASONING_ENGINE="$VERTEX_REASONING_ENGINE_NAME"
