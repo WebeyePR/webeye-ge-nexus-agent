@@ -544,3 +544,58 @@ class TestChineseQueryExpansion:
 
         assert _expand_zh_query("日历") == "日历 calendar"
         assert _expand_zh_query("calendar") == "calendar"
+
+
+# ---------------------------------------------------------------------------
+# 思考深度可配置（2026-10-27 实测：thinking token 是首响应延迟主导变量）
+# 直连模型同任务对比：thinking=535 → 4.3s，=104 → 2.6s。
+# Agent 级 A/B（6 任务 × 2 轮）：LOW 档 12/12 正确、快 45%~67%。
+# ---------------------------------------------------------------------------
+
+class TestThinkingLevelConfig:
+    """AGENT_THINKING_LEVEL 三态行为：未设/合法/非法。"""
+
+    def _reload(self, value):
+        import importlib
+
+        import nexus_agent.agent as A
+
+        old = os.environ.get("AGENT_THINKING_LEVEL")
+        if value is None:
+            os.environ.pop("AGENT_THINKING_LEVEL", None)
+        else:
+            os.environ["AGENT_THINKING_LEVEL"] = value
+        try:
+            return importlib.reload(A).root_agent.generate_content_config
+        finally:
+            if old is None:
+                os.environ.pop("AGENT_THINKING_LEVEL", None)
+            else:
+                os.environ["AGENT_THINKING_LEVEL"] = old
+            importlib.reload(A)
+
+    def test_default_no_thinking_config(self):
+        """未设时不注入 thinking_config（沿用模型默认档）。"""
+        cfg = self._reload(None)
+        assert cfg.thinking_config is None
+
+    def test_low_level_applied(self):
+        """LOW 必须真实映射到 genai 枚举。"""
+        cfg = self._reload("LOW")
+        assert cfg.thinking_config is not None
+        assert str(cfg.thinking_config.thinking_level).endswith("LOW")
+
+    def test_invalid_level_ignored(self):
+        """非法值必须忽略而非报错（防部署后模型调用崩溃）。"""
+        cfg = self._reload("BOGUS")
+        assert cfg.thinking_config is None
+
+    def test_temperature_preserved(self):
+        """temperature 必须保持 0.2（输出稳定性）。"""
+        assert self._reload("LOW").temperature == 0.2
+
+    def test_deploy_filters_empty_env(self):
+        """空 env 必须被过滤（proto 拒绝空字符串）。"""
+        with open("nexus_agent/deployment/deploy.py") as f:
+            src = f.read()
+        assert 'env_vars = {k: v for k, v in env_vars.items() if v}' in src
