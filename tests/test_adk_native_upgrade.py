@@ -264,3 +264,93 @@ class TestPluginCallbackSignatureContract:
             pm.run_before_tool_callback(tool=tool, tool_args={"cmd": "docs"}, tool_context=None)
         )
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# 模型韧性：FallbackModel 跨模型故障转移 + RunConfig 调用上限
+# （2026-10-27 参照 kerun_ai_web 调研落地；降级行为已用真实调用验证，
+#   此处锚定装配契约与可重试状态码集合，防后续误改回单模型）
+# ---------------------------------------------------------------------------
+
+class TestModelResilience:
+    """模型装配应为 FallbackModel 链，且与同模型重试插件互补。"""
+
+    def test_root_agent_uses_fallback_model_chain(self):
+        from google.adk.models import FallbackModel
+
+        from nexus_agent.agent import root_agent
+
+        model = root_agent.model
+        assert isinstance(model, FallbackModel), "生产装配必须为 FallbackModel 故障转移链"
+        names = [getattr(m, "model", m) for m in model.models]
+        assert names[0] == os.getenv("MODEL_NAME", "gemini-3.8-flash")
+        assert len(names) >= 2, "至少一个备用模型，否则故障转移无意义"
+
+    def test_fallback_chain_entries_resolvable(self):
+        """链上每个模型名都必须能被 LLMRegistry 解析（写错名字=静默失效）。"""
+        from nexus_agent.agent import root_agent
+
+        for entry in root_agent.model.models:
+            delegate = root_agent.model._delegate(entry)
+            assert delegate.model, f"模型 {entry} 无法解析为实例"
+
+    def test_retriable_status_codes_contract(self):
+        """可重试状态码集合必须覆盖限流与服务端错误（ADK 默认值）。"""
+        from nexus_agent.agent import root_agent
+
+        codes = root_agent.model.retriable_status_codes
+        assert {429, 500, 502, 503, 504} <= set(codes)
+        # 408 故意不含：切模型可能导致同一 prompt 被计费两次
+        assert 408 not in codes
+
+    def test_fallback_disabled_by_empty_env(self):
+        """AGENT_FALLBACK_MODELS 置空应回退单模型（运维应急开关）。"""
+        import importlib
+
+        import nexus_agent.agent as agent_mod
+
+        old = os.environ.get("AGENT_FALLBACK_MODELS")
+        os.environ["AGENT_FALLBACK_MODELS"] = ""
+        try:
+            reloaded = importlib.reload(agent_mod)
+            assert not hasattr(reloaded.root_agent.model, "models"), "置空后应为单模型字符串"
+        finally:
+            if old is None:
+                os.environ.pop("AGENT_FALLBACK_MODELS", None)
+            else:
+                os.environ["AGENT_FALLBACK_MODELS"] = old
+            importlib.reload(agent_mod)
+
+    def test_deploy_passes_model_and_call_limit_env(self):
+        """部署必须透传模型链与调用上限，否则远程运行时无法配置。"""
+        with open("nexus_agent/deployment/deploy.py") as f:
+            src = f.read()
+        assert '"MODEL_NAME"' in src
+        assert '"AGENT_FALLBACK_MODELS"' in src
+        assert '"ADK_MAX_LLM_CALLS"' in src
+
+
+class TestRunConfigCallLimit:
+    """RunConfig.max_llm_calls 防失控循环护栏。"""
+
+    def test_default_call_limit_is_bounded(self):
+        from google.adk.agents.run_config import RunConfig
+
+        assert 0 < RunConfig().max_llm_calls < 10_000, "默认上限必须有界且合理"
+
+    def test_env_override_honored(self):
+        import importlib
+
+        import google.adk.agents.run_config as rc
+
+        old = os.environ.get("ADK_MAX_LLM_CALLS")
+        os.environ["ADK_MAX_LLM_CALLS"] = "123"
+        try:
+            importlib.reload(rc)
+            assert rc.RunConfig().max_llm_calls == 123
+        finally:
+            if old is None:
+                os.environ.pop("ADK_MAX_LLM_CALLS", None)
+            else:
+                os.environ["ADK_MAX_LLM_CALLS"] = old
+            importlib.reload(rc)

@@ -225,6 +225,15 @@ def _run_deploy() -> None:
                 "GOOGLE_GENAI_USE_ENTERPRISE": os.getenv(
                     "GOOGLE_GENAI_USE_ENTERPRISE", "1"
                 ),
+                # 模型装配（与 nexus_agent/agent.py 读取逻辑一致，远程运行时
+                # 可配置）：主模型 + FallbackModel 跨模型故障转移链候选
+                "MODEL_NAME": os.getenv("MODEL_NAME", "gemini-3.8-flash"),
+                "AGENT_FALLBACK_MODELS": os.getenv(
+                    "AGENT_FALLBACK_MODELS", "gemini-3.7-flash,gemini-3.6-flash"
+                ),
+                # 单次运行 LLM 调用上限（RunConfig.max_llm_calls 的 env 覆盖，
+                # ADK 默认 500）：防失控循环的护栏，200 对工具链场景余量充足
+                "ADK_MAX_LLM_CALLS": os.getenv("ADK_MAX_LLM_CALLS", "200"),
             },
         )
     except FuturesTimeoutError:

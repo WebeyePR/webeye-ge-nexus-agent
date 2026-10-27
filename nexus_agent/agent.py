@@ -1,6 +1,7 @@
 import os
 
 from google.adk.agents.llm_agent import Agent
+from google.adk.models import FallbackModel
 
 from .tools import (
     query_lark_documents,
@@ -191,11 +192,32 @@ def _confirm_real_mutation(**kwargs) -> bool:
 # 见 docs/升级后全量功能验证清单.md F5）
 _ENABLE_TOOL_CONFIRMATION = os.getenv("AGENT_ENABLE_TOOL_CONFIRMATION", "1") == "1"
 
+# --- 模型装配：主模型 + 跨模型故障转移链 -------------------------------------
+# ADK 2.9+ 原生 FallbackModel（实验特性，_feature_registry default_on=True）：
+# 仅当模型调用返回 429/500/502/503/504 时按序切换下一模型；流式回合一旦产出
+# 首个响应即锁定当前模型（不拼接两个模型的输出）。与 deploy.py 的
+# ReflectAndRetryModelPlugin（同模型瞬时故障重试 3 次）互补成两级韧性：
+# 先原地重试，仍失败再跨模型降级。
+# 回退开关：AGENT_FALLBACK_MODELS 置空 → 单模型（旧行为）。
+# 候选链均为本项目 2026-10-27 真实调用核验可用的模型（见项目工作日志）。
+_MODEL_NAME = os.getenv("MODEL_NAME", "gemini-3.8-flash")
+_FALLBACK_MODELS = [
+    m.strip()
+    for m in os.getenv("AGENT_FALLBACK_MODELS", "gemini-3.7-flash,gemini-3.6-flash").split(",")
+    if m.strip()
+]
+_root_model: object = (
+    FallbackModel(models=[_MODEL_NAME, *_FALLBACK_MODELS])
+    if _FALLBACK_MODELS
+    else _MODEL_NAME
+)
+
 root_agent = Agent(
     # gemini-3.8-flash：2026-09 稳定版，官方定位"为长程编码与自主智能体打造的
     # 最智能主力模型"，与本项目企业工具代理场景精确匹配（本项目 2026-10-27
     # 真实调用核验可用；旧默认 gemini-3-flash-preview 为 2025-12 preview 模型）。
-    model=os.getenv("MODEL_NAME", "gemini-3.8-flash"),
+    # AGENT_FALLBACK_MODELS 非空时包装为 FallbackModel 跨模型故障转移链。
+    model=_root_model,
     name="webeye_nexus_agent",
     description="WebEye Nexus Agent for Gemini Enterprise: an ADK-based enterprise agent for Feishu/Lark and Google Workspace operations.",
     # ADK 2.13 原生：指令为纯静态文本（无状态占位符），置于 static_instruction
