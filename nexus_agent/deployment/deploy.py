@@ -322,8 +322,11 @@ def _run_deploy() -> None:
             "ADK_MAX_LLM_CALLS": os.getenv("ADK_MAX_LLM_CALLS", "200"),
             # 思考深度（延迟主导变量）。2026-10-27 实测：LOW 档在本项目
             # 6 任务 × 2 轮 A/B 中 12/12 正确且快 45%~67%。留空 = 用模型
-            # 默认档；设为 MINIMAL/LOW/MEDIUM/HIGH 可切换。
-            "AGENT_THINKING_LEVEL": os.getenv("AGENT_THINKING_LEVEL", ""),
+                # 思考深度（延迟主导变量）。2026-10-27 真实 A/B 结论：
+                # Agent 级 6 任务 × 2 轮 → LOW 12/12 正确、默认档 10/12；
+                # 远程实测 LOW 首事件中位 6.0s vs 默认 10.8s，SSE 回归 6/6。
+                # 默认 LOW；需更高推理深度时设 MINIMAL/MEDIUM/HIGH 覆盖。
+                "AGENT_THINKING_LEVEL": os.getenv("AGENT_THINKING_LEVEL", "LOW"),
         }
         _env_vars = {k: v for k, v in _env_vars.items() if v}
 

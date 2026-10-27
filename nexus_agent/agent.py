@@ -294,8 +294,9 @@ root_agent = Agent(
     # gemini-3.8-flash 默认档位下简单任务也会产生 100~500 thinking tokens。
     # Agent 级 A/B（6 任务 × 2 轮）：LOW 档 12/12 正确、比默认档快 45%~67%
     # （默认档反而有 2 次未调工具）。LOW 适合本项目的工具调度型任务。
-    # 默认保持不设（用模型默认），由 AGENT_THINKING_LEVEL 环境变量切换，
-    # 可选值 MINIMAL / LOW / MEDIUM / HIGH；置空或非法值则不设置。
+    # 默认档由 AGENT_THINKING_LEVEL 控制（deploy.py 默认传 LOW）；本地未设
+    # 环境变量时保持不设置（用模型默认档），可选 MINIMAL/LOW/MEDIUM/HIGH，
+    # 置空或非法值则不设置。
     generate_content_config=_thinking_config(),
 )
 
