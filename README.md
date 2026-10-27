@@ -80,6 +80,8 @@ sequenceDiagram
 *   **凭证安全沙箱化与惰性获取**：将 `lark-cli` 及 `gws` 二进制调用器中获取用户 OAuth Token 的逻辑深埋于底层执行沙箱中，仅在命令执行前一刻进行加密和惰性拉取，且全程由 `try-except` 进行强力容错防护。彻底根治了临期 Token 过期或获取网络抖动导致的启动级/调用级崩溃。
 *   **强类型安全守卫 (Guardians)**：在所有高频及高风险工具（如创建/列出日程等）的入口层引入物理级及强类型参数校准机制。对 `datetime`、`max_results` 等参数进行强制校验、转换与格式归一化。即使大模型在幻觉或极端语境下生成了不合规、越界的 JSON 入参，也会被防御层静默校准与修复，绝对不传导至底层，保障系统无懈可击。
 *   **弹性降级拦截**：所有的底层 API 与 CLI 工具皆由双重 `try-except` 兜底。若飞书侧或 Google 日历服务器发生临时熔断，Agent 将通过规范化的 JSON-RPC 容错报文进行弹性降级答复，以友好、专业的回复代替系统异常栈抛出，守护模型完美的运行时生命周期。
+*   **两级模型韧性**：同模型瞬时故障由 `ReflectAndRetryModelPlugin` 原地重试（默认 3 次）；仍失败且返回 429/500/502/503/504 时，由 ADK 原生 `FallbackModel` 跨模型降级到备用链（`MODEL_NAME` → `AGENT_FALLBACK_MODELS`）。流式回合产出首个响应后即锁定当前模型，不拼接两个模型的输出。
+*   **CLI 输出体量护栏**：单次 CLI 输出超过 20 万字符时保留首尾并给出分页指引（`page_size`/`page_token`），防止列举大结果集时灌爆 LLM 上下文、抬高 token 成本。
 
 ## ⚙️ 配置 (.env)
 
@@ -117,8 +119,13 @@ GOOGLE_WORKSPACE_TOKEN_URI="https://oauth2.googleapis.com/token"
 PROJECT_ID="your-gcp-project-id"
 # （选填）API 服务区域 (如 us-central1，全局为 global)
 LOCATION="global"
-# （选填）目标 Gemini 模型名称 (如 gemini-3-flash-preview)
-MODEL_NAME="gemini-3-flash-preview"
+# （选填）目标 Gemini 模型名称（主模型，当前生产为 gemini-3.8-flash）
+MODEL_NAME="gemini-3.8-flash"
+# （选填）备用模型链（逗号分隔），主模型遇 429/500/502/503/504 时按序降级；
+# 置空则关闭跨模型故障转移、退回单模型
+AGENT_FALLBACK_MODELS="gemini-3.7-flash,gemini-3.6-flash"
+# （选填）单次运行 LLM 调用上限（防失控循环护栏，ADK 默认 500）
+# ADK_MAX_LLM_CALLS="200"
 
 # --- Google Cloud 部署配置 ---
 # （选填）Reasoning Engine 的部署区域 (如 us-central1)
@@ -217,12 +224,20 @@ bash scripts/init.sh
 ```
 *注意：脚本会自动从 `.env.example` 创建 `.env`。执行后请务必打开 `.env` 并根据注释填写必填参数。*
 
-**2. 一键部署**:
+**2. 部署前校验（推荐先跑）**:
 ```bash
-# 自动执行：打包应用 -> 部署到 Vertex AI -> 自动注册/更新到 Gemini Enterprise
+# 只读校验：7 项检查（工具链/必填配置/项目可达/ADC/所需 API/CLI 二进制/bucket+GE）
+# 不产生任何云端变更，输出 ✓/!/✗ 就绪度报告
 bash deploy.sh
 ```
+
+**3. 一键部署**:
+```bash
+# 自动执行：打包应用 -> 部署到 Vertex AI -> 自动注册/更新到 Gemini Enterprise
+bash deploy.sh deploy
+```
 *部署完成后，控制台会输出直接访问 Gemini Enterprise 和 Vertex AI 的快捷链接。*
+*多环境：`bash deploy.sh deploy staging` 使用 `.env-staging`；旧用法 `bash deploy.sh staging` 仍然兼容。*
 
 ---
 
@@ -310,6 +325,7 @@ uv run adk web
 ## 📚 相关文档
 
 *   [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) - 详细的打包部署指南
+*   [tests/remote/README.md](tests/remote/README.md) - 远程生产引擎回归测试（12 用例真实调用，含 3 条必守调用规范）
 *   [scripts/README.md](scripts/README.md) - 脚本工具使用说明
 *   [docs/GEMINI_ENTERPRISE_REGISTRATION_GUIDE.md](docs/GEMINI_ENTERPRISE_REGISTRATION_GUIDE.md) - Gemini Enterprise 注册指南
 *   [docs/FEISHU_DOC_SAVE_MCP_GUIDE.md](docs/FEISHU_DOC_SAVE_MCP_GUIDE.md) - 飞书云文档写入能力说明
