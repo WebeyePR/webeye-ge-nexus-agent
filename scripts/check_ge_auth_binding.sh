@@ -12,7 +12,9 @@
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/load_env.sh" "$1"
+# 环境后缀：本脚本第 1 个参数（load_env.sh 不再读取 source 时的 $1）
+export ENV_SUFFIX="${1:-${ENV_SUFFIX:-}}"
+source "$SCRIPT_DIR/load_env.sh"
 
 if [ -z "$GE_AGENT_RESOURCE_NAME" ]; then
     echo "⏭️  跳过授权绑定校验：未找到 GE_AGENT_RESOURCE_NAME（首次注册前正常）"

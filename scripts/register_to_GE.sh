@@ -11,7 +11,9 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 AGENT_DISPLAY_NAME="${AGENT_DISPLAY_NAME:-Lark Document Agent}"
 AGENT_DESCRIPTION="${AGENT_DESCRIPTION:-Lark Document Agent}"
 
-source "$SCRIPT_DIR/load_env.sh" "$1"
+# 环境后缀：本脚本第 1 个参数（load_env.sh 不再读取 source 时的 $1）
+export ENV_SUFFIX="${1:-${ENV_SUFFIX:-}}"
+source "$SCRIPT_DIR/load_env.sh"
 
 # 检查必要参数
 if [ -z "$PROJECT_ID" ] || [ -z "$LARK_AUTH_ID" ] || [ -z "$LARK_CLIENT_ID" ] || [ -z "$VERTEX_REASONING_ENGINE_NAME" ] || [ -z "$GE_APP_ID" ] || [ -z "$GE_APP_LOCATION" ]; then
