@@ -29,19 +29,52 @@ def test_build_length_warning_warns_for_long_auth_url():
     assert "189" in warning
 
 
-def test_lark_scopes_file_is_reduced_to_current_oauth_surface():
+def test_lark_scopes_file_separates_user_and_tenant_only():
+    """2026-10-30：user 只保留可用户授权项，tenant-only 移入 tenant 数组。
+
+    背景：tenant-only 权限用户身份永远授权不到，放进 authorize URL 属无效请求
+    （可能触发 20068），且对应的能力在用户态根本不可用。
+    """
     scopes_path = os.path.join(os.path.dirname(__file__), "..", "scripts", "lark_scopes.json")
     with open(scopes_path, encoding="utf-8") as f:
-        scopes_data = json.load(f)
+        data = json.load(f)
 
-    user_scopes = scopes_data["scopes"]["user"]
-    tenant_scopes = scopes_data["scopes"]["tenant"]
+    user, tenant = data["scopes"]["user"], data["scopes"]["tenant"]
 
-    assert tenant_scopes == []
-    # 采用不小于阈值的防御性测试，目前飞书具有 27 个 scopes，防止未来范围继续扩大造成断言崩溃
-    assert len(user_scopes) >= 20
-    assert "docs:document.content:read" in user_scopes
-    assert "docx:document" in user_scopes
-    assert "drive:drive" in user_scopes
-    assert "search:docs:read" in user_scopes
-    assert "im:message" in user_scopes
+    # 1) tenant-only 权限不得出现在 user
+    for scope in (
+        "drive:drive",
+        "drive:drive:readonly",
+        "drive:drive.search:readonly",
+        "im:chat",
+        "im:message.group_msg",
+        "wiki:wiki",
+        "bitable:app",
+    ):
+        assert scope not in user, f"{scope} 属 tenant-only，不应出现在 user 数组"
+        assert scope in tenant, f"{scope} 应归档到 tenant 数组"
+
+    # 2) 关键用户态能力仍在
+    for scope in (
+        "docs:document.content:read",
+        "docx:document",
+        "im:message",
+        "search:docs:read",
+        "offline_access",
+    ):
+        assert scope in user
+
+    # 3) 两个数组都必须去重（原文件曾有 docx:document / im:message 重复）
+    assert len(user) == len(set(user))
+    assert len(tenant) == len(set(tenant))
+
+    # 4) 明确标注已被分批清单取代
+    assert data.get("supersededBy") == "docs/lark_scope_batches.json"
+
+    # 5) user 必须是分批清单的子集；tenant-only 不得混进分批清单
+    plan_path = os.path.join(os.path.dirname(__file__), "..", "docs", "lark_scope_batches.json")
+    with open(plan_path, encoding="utf-8") as f:
+        plan = json.load(f)
+    batched = {s for b in plan["batches"] for s in b["scopes"]}
+    assert set(user) <= batched
+    assert not (set(tenant) & batched)

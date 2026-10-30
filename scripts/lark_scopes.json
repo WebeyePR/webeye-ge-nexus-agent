@@ -1,22 +1,26 @@
 {
+  "supersededBy": "docs/lark_scope_batches.json",
+  "note": "本文件仅服务单批回滚场景（generate_auth_link.py 的 legacy 路径）。分批授权的权威清单见 docs/lark_scope_batches.json；应用已开通权限的权威源是飞书 app.scopes。2026-10-30 起 user 数组只保留可用户授权（token_types 含 user）的权限，tenant-only 权限移入 tenant 数组并从用户授权链接中排除。",
   "scopes": {
-    "tenant": [],
+    "tenant": [
+      "bitable:app",
+      "drive:drive",
+      "drive:drive.search:readonly",
+      "drive:drive:readonly",
+      "wiki:wiki",
+      "im:chat",
+      "im:message.group_msg"
+    ],
     "user": [
       "offline_access",
-      "bitable:app",
       "docx:document",
       "docs:document:import",
       "docs:document.content:read",
       "docs:document:export",
       "docs:permission.setting:read",
-      "docx:document",
       "docx:document:readonly",
       "docs:document.media:download",
-      "drive:drive",
       "drive:drive.metadata:readonly",
-      "drive:drive.search:readonly",
-      "drive:drive:readonly",
-      "wiki:wiki",
       "wiki:wiki:readonly",
       "drive:export:readonly",
       "search:docs:read",
@@ -25,9 +29,6 @@
       "calendar:calendar.event:create",
       "calendar:calendar.event:read",
       "calendar:calendar.event:update",
-      "im:chat",
-      "im:message",
-      "im:message.group_msg",
       "im:message"
     ]
   }

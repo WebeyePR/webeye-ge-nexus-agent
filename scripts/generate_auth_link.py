@@ -119,14 +119,22 @@ def generate_lark_auth_url():
             print(f"Error: Failed to parse {scopes_file}. Please check the JSON format.")
             return
 
-    # 合并 user 和 tenant 权限（OAuth2 授权通常需要 user 权限）
-    user_scopes = scopes_data.get('scopes', {}).get('user', [])
-    tenant_scopes = scopes_data.get('scopes', {}).get('tenant', [])
-    all_scopes = sorted(list(set(user_scopes) | set(tenant_scopes)))
+    # 用户身份授权只能带 user 态权限：
+    # tenant-only 权限用户永远授权不到，放进链接属无效请求（且可能触发 20068）。
+    # 2026-10-30 起不再合并 user ∪ tenant。
+    user_scopes = list(dict.fromkeys(scopes_data.get('scopes', {}).get('user', [])))
+    tenant_scopes = list(dict.fromkeys(scopes_data.get('scopes', {}).get('tenant', [])))
+    all_scopes = sorted(user_scopes)
 
     if not all_scopes:
-        print("Error: No scopes found in lark_scopes.json.")
+        print("Error: No user scopes found in lark_scopes.json.")
         return
+
+    if tenant_scopes:
+        print(
+            f"提示: 已排除 {len(tenant_scopes)} 项 tenant-only 权限（用户身份无法授权）: "
+            f"{', '.join(tenant_scopes)}"
+        )
 
     # 3. 获取关键配置参数
     client_id = os.getenv("LARK_CLIENT_ID")
@@ -170,9 +178,11 @@ def generate_lark_auth_url():
         print(length_warning)
         print("-" * 50)
     print("操作建议：")
-    print("1. 确保已在飞书开放平台后台勾选了 lark_scopes.json 中的所有权限并发布版本。")
+    print("1. 确保已在飞书开放平台后台勾选了 lark_scopes.json 的 user 权限并发布版本"
+          "（tenant 数组为应用身份权限，不会进入用户授权链接）。")
     print("2. 将上述链接更新到 .env 文件的 LARK_AUTHORIZATION_URI 变量中。")
     print("3. 点击该链接重新进行授权以获取包含新权限的 Token。")
+    print("   注：本路径仅用于单批回滚；分批授权请用 docs/lark_scope_batches.json。")
     print("-" * 50)
 
 if __name__ == "__main__":

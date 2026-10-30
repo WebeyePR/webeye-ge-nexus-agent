@@ -194,6 +194,29 @@ token。`deploy.sh` 在更新部署后会调用它（只告警、不自动改授
 
 ---
 
+### 11. `plan_lark_scope_batches.py`
+**功能**：一键生成/校验飞书分批授权清单（`docs/lark_scope_batches.json`）
+
+**使用方法**：
+```bash
+python3 scripts/plan_lark_scope_batches.py --check        # 默认：拉 app.scopes 比对现有清单
+python3 scripts/plan_lark_scope_batches.py --write        # 重算并写回（先备份 .bak）
+python3 scripts/plan_lark_scope_batches.py --from-cache app_scopes.json --check   # 离线
+```
+
+**特点**：
+- 数据源是飞书 `app.scopes`，只取 `token_types` 含 `user` 的权限（tenant-only 用户态拿不到）
+- 按场景聚类分 4 批；未归类的域并入最后一批并**打印**，不静默丢弃
+- 单批 >45 **报错不落盘**：静默拆批会改名，与线上 `ge-nexus-feishu-N` 资源错位
+- 比较按「批名 → scope 集合」，不比顺序（API 返回顺序可能变化）
+- 已实测能**完整复现**当前线上 173 项清单（rc=0）
+
+**新增能力时的顺序**：飞书后台开通权限 → `--check` → `--write` →
+若批次数/批名变化则同步 `.env` 的 `LARK_AUTH_IDS` → `lark_auth_batches.py --apply`
+→ `check_ge_auth_binding.sh`。
+
+---
+
 ## 🔧 配置说明
 
 所有脚本都通过 `scripts/load_env.sh` 自动加载以下配置文件：
