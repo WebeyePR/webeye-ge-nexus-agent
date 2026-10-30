@@ -4,6 +4,9 @@ from urllib.parse import parse_qs, quote, urlparse
 
 URL_LENGTH_WARNING_THRESHOLD = 4000
 
+# 官方登记的 GE OAuth 回调（飞书侧 authorize 缺它会直接报「redirect_uri 请求不合法」）
+DEFAULT_REDIRECT_URI = "https://vertexaisearch.cloud.google.com/oauth-redirect"
+
 
 def build_auth_url(base_url: str, params: dict) -> str:
     query_parts = []
@@ -29,6 +32,68 @@ def build_length_warning(auth_url: str, scope_count: int) -> str:
     )
 
 
+def generate_batch_auth_urls() -> bool:
+    """分批授权模式：按 docs/lark_scope_batches.json 每批生成一条链接。
+
+    触发条件：LARK_AUTH_IDS 非空且批次定义文件存在。返回 True 表示已处理，
+    调用方应直接结束（不再走旧的单批链接逻辑）。
+
+    为什么必须分批：飞书单次授权能带的 scope 有上限（本项目按 45/批 设计），
+    173 项用户态权限无法塞进一条链接。
+    """
+    ids = [x.strip() for x in (os.getenv("LARK_AUTH_IDS") or "").split(",") if x.strip()]
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    plan_path = os.path.join(root_dir, "docs", "lark_scope_batches.json")
+    if not ids or not os.path.exists(plan_path):
+        return False
+
+    client_id = os.getenv("LARK_CLIENT_ID")
+    if not client_id:
+        print("Error: LARK_CLIENT_ID not found in .env file.")
+        return True
+
+    try:
+        with open(plan_path, encoding="utf-8") as f:
+            plan = json.load(f)
+    except json.JSONDecodeError:
+        print(f"Error: Failed to parse {plan_path}.")
+        return True
+
+    by_name = {b.get("name"): b for b in plan.get("batches", [])}
+    redirect_uri = os.getenv("LARK_REDIRECT_URI") or DEFAULT_REDIRECT_URI
+    base_url = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
+
+    print("=" * 50)
+    print(f"分批授权模式：LARK_AUTH_IDS 共 {len(ids)} 批")
+    print(f"redirect_uri: {redirect_uri}")
+    print("=" * 50)
+
+    for index, auth_id in enumerate(ids, 1):
+        batch = by_name.get(auth_id)
+        if not batch:
+            print(f"\n[{index}] {auth_id}: ★ 批次定义缺失，跳过（请检查 docs/lark_scope_batches.json）")
+            continue
+        scopes = list(dict.fromkeys(batch.get("scopes") or []))
+        params = {
+            "client_id": client_id,
+            "response_type": "code",
+            "redirect_uri": redirect_uri,
+            "scope": " ".join(scopes),
+            "prompt": "consent",
+        }
+        url = build_auth_url(base_url, params)
+        print(f"\n[{index}] {auth_id}（{len(scopes)} 项 · {batch.get('label', '')}）")
+        print(url)
+        warning = build_length_warning(url, len(scopes))
+        if warning:
+            print(warning)
+
+    print("\n" + "=" * 50)
+    print("说明：分批模式下这些链接仅用于人工核验；真实授权由 GE 按 authorization 资源触发。")
+    print("=" * 50)
+    return True
+
+
 def generate_lark_auth_url():
     # 1. 尝试加载 .env 文件获取配置
     try:
@@ -36,6 +101,10 @@ def generate_lark_auth_url():
         load_dotenv()
     except ImportError:
         pass
+
+    # 分批授权优先：LARK_AUTH_IDS 非空且批次定义存在时，按批输出并结束
+    if generate_batch_auth_urls():
+        return
 
     # 2. 读取权限配置文件
     scopes_file = os.path.join(os.path.dirname(__file__), 'lark_scopes.json')
@@ -85,8 +154,9 @@ def generate_lark_auth_url():
         "scope": " ".join(all_scopes) # 注意：urlencode 会处理空格转义
     }
 
-    if redirect_uri:
-        params["redirect_uri"] = redirect_uri
+    # 永远带 redirect_uri：缺它飞书 authorize 会直接报「redirect_uri 请求不合法」
+    params["redirect_uri"] = redirect_uri or DEFAULT_REDIRECT_URI
+    params["prompt"] = "consent"
 
     final_url = build_auth_url(base_url, params)
 

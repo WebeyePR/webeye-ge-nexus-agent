@@ -294,6 +294,16 @@ fi
 # 重新加载部署生成的变量 (包含刚刚生成的 GE_AGENT_RESOURCE_NAME)
 source scripts/load_env.sh "$ENV_SUFFIX"
 
+# 分批授权一致性校验（2026-10-30）：
+# 部署只更新 engine 绑定，不会改 authorizationConfig。若 agent 上绑的批次与
+# LARK_AUTH_IDS 不一致，用户会「授权了却读不到 token」。此处只告警、不自动改，
+# 避免部署流程擅自变更授权配置（config.sh 未失败中断，用 || 兜住 set -e）。
+if [ -n "$LARK_AUTH_IDS" ] && [ -n "$GE_AGENT_RESOURCE_NAME" ]; then
+    echo "--- 校验 Agent 授权绑定与 LARK_AUTH_IDS 是否一致 ---"
+    bash scripts/check_ge_auth_binding.sh "$ENV_SUFFIX" || \
+        echo "⚠️  警告: 授权绑定与 LARK_AUTH_IDS 不一致（见上方缺失项）。未自动修改，请人工修复后再验证授权。"
+fi
+
 # 清理旧的 Reasoning Engine 资源 (避免云端资源累积和持续计费)
 if [ -n "$PREVIOUS_REASONING_ENGINE" ] && [ "$PREVIOUS_REASONING_ENGINE" != "$VERTEX_REASONING_ENGINE_NAME" ]; then
     echo "--- 正在清理历史 Reasoning Engine 资源 ---"

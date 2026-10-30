@@ -67,7 +67,20 @@ PY
 # 获取项目编号，用于资源名称引用
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)")
 
-AUTH_RESOURCES=("\"projects/$PROJECT_NUMBER/locations/${GE_APP_LOCATION}/authorizations/$LARK_AUTH_ID\"")
+AUTH_RESOURCES=()
+
+if [ -n "$LARK_AUTH_IDS" ]; then
+    # 分批授权模式（2026-10-30）：每批一个 authorization。
+    # 幂等：缺失则创建，已存在只校验不修改；有偏差即中止，避免绑定残缺授权。
+    echo "1. 检测到分批授权 LARK_AUTH_IDS=$LARK_AUTH_IDS，正在确保各批资源就绪 ..."
+    python3 "$SCRIPT_DIR/lark_auth_batches.py" --env-file "$BASE_ENV_FILE" --apply
+    while IFS= read -r auth_resource_name; do
+        [ -n "$auth_resource_name" ] && AUTH_RESOURCES+=("\"$auth_resource_name\"")
+    done < <(python3 "$SCRIPT_DIR/lark_auth_batches.py" --env-file "$BASE_ENV_FILE" --print-names)
+    echo "   → 已准备 ${#AUTH_RESOURCES[@]} 条飞书授权资源"
+else
+    # 单批模式（历史行为，保留兼容）
+    AUTH_RESOURCES=("\"projects/$PROJECT_NUMBER/locations/${GE_APP_LOCATION}/authorizations/$LARK_AUTH_ID\"")
 
 echo "1. 正在创建 OAuth 授权资源: $LARK_AUTH_ID ..."
 LARK_AUTH_RESPONSE=$(curl --http1.1 -s -X POST \
@@ -86,6 +99,7 @@ LARK_AUTH_RESPONSE=$(curl --http1.1 -s -X POST \
    }")
 echo "$LARK_AUTH_RESPONSE"
 assert_no_api_error "$LARK_AUTH_RESPONSE" "创建飞书 OAuth 授权资源" "true"
+fi
 
 if [ -n "$GOOGLE_WORKSPACE_CLIENT_ID" ] || [ -n "$GOOGLE_WORKSPACE_CLIENT_SECRET" ] || [ -n "$GOOGLE_WORKSPACE_AUTHORIZATION_URI" ] || [ -n "$GOOGLE_WORKSPACE_TOKEN_URI" ]; then
     if [ -z "$GOOGLE_WORKSPACE_AUTH_ID" ] || [ -z "$GOOGLE_WORKSPACE_CLIENT_ID" ] || [ -z "$GOOGLE_WORKSPACE_CLIENT_SECRET" ] || [ -z "$GOOGLE_WORKSPACE_AUTHORIZATION_URI" ] || [ -z "$GOOGLE_WORKSPACE_TOKEN_URI" ]; then

@@ -43,18 +43,25 @@ else
 fi
 
 # 3. 删除授权资源 (Authorization)
-if [ -n "$LARK_AUTH_ID" ]; then
-    # 注意：如果授权资源被其他 Agent 使用，脚本内部会返回错误响应
-    bash "$SCRIPT_DIR/delete_authorization.sh" "$LARK_AUTH_ID"
-else
-    echo "⏭️  跳过授权资源删除: 未在 $BASE_ENV_FILE 中找到 LARK_AUTH_ID"
-fi
+#    分批授权（2026-10-30）：需逐个删除 LARK_AUTH_IDS 里的每一批 + 旧单批 +
+#    GWS，否则卸载后 4 批资源会残留（脏资源，重建时易与旧资源混淆）。
+CLEANUP_AUTH_IDS=""
+[ -n "$LARK_AUTH_IDS" ] && CLEANUP_AUTH_IDS="$LARK_AUTH_IDS"
+[ -n "$LARK_AUTH_ID" ] && CLEANUP_AUTH_IDS="${CLEANUP_AUTH_IDS:+$CLEANUP_AUTH_IDS,}$LARK_AUTH_ID"
+[ -n "$GOOGLE_WORKSPACE_AUTH_ID" ] && CLEANUP_AUTH_IDS="${CLEANUP_AUTH_IDS:+$CLEANUP_AUTH_IDS,}$GOOGLE_WORKSPACE_AUTH_ID"
 
-if [ -n "$GOOGLE_WORKSPACE_AUTH_ID" ]; then
-    # 注意：如果授权资源被其他 Agent 使用，脚本内部会返回错误响应
-    bash "$SCRIPT_DIR/delete_authorization.sh" "$GOOGLE_WORKSPACE_AUTH_ID"
+AUTH_ID_LIST=$(echo "$CLEANUP_AUTH_IDS" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | awk 'NF && !seen[$0]++')
+
+if [ -z "$AUTH_ID_LIST" ]; then
+    echo "⏭️  跳过授权资源删除: 未在 $BASE_ENV_FILE 中找到任何 AUTH_ID"
 else
-    echo "⏭️  跳过授权资源删除: 未在 $BASE_ENV_FILE 中找到 GOOGLE_WORKSPACE_AUTH_ID"
+    echo "🗑️  待删除授权资源（$(echo "$AUTH_ID_LIST" | wc -l | tr -d ' ') 条）:"
+    echo "$AUTH_ID_LIST" | sed 's/^/   - /'
+    while IFS= read -r auth_id; do
+        [ -z "$auth_id" ] && continue
+        # 注意：如果授权资源被其他 Agent 使用，脚本内部会返回错误响应并安全跳过
+        bash "$SCRIPT_DIR/delete_authorization.sh" "$auth_id"
+    done <<< "$AUTH_ID_LIST"
 fi
 
 # 4. 删除 Vertex AI Reasoning Engine

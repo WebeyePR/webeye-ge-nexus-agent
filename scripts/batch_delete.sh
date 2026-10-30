@@ -134,6 +134,18 @@ except Exception:
     pass
 ")
         
+        # 保护名单（2026-10-30）：配置里引用的 auth 一律不删，
+        # 即使当前没被任何 agent 使用 —— 分批切换后旧单批正是回滚通道。
+        PROTECTED_AUTH_IDS="$LARK_AUTH_ID,$LARK_AUTH_IDS,$GOOGLE_WORKSPACE_AUTH_ID"
+        FILTERED_UNUSED=""
+        for candidate in $unused_auths; do
+            case ",$PROTECTED_AUTH_IDS," in
+                *",$candidate,"*) echo "⏭️  跳过受保护授权资源（配置仍在引用）: $candidate" ;;
+                *) FILTERED_UNUSED="$FILTERED_UNUSED $candidate" ;;
+            esac
+        done
+        unused_auths=$(echo "$FILTERED_UNUSED" | tr ' ' '\n' | awk 'NF')
+
         if [ -z "$unused_auths" ]; then
             echo "✅ 没有未使用的授权资源"
         else

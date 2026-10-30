@@ -138,6 +138,10 @@ PORT=8080 ./scripts/run.local.sh web   # 自定义端口
 2. 脚本会自动加载 `.env` 和 `.deploy_env` 中的配置
 3. 如果授权资源已存在，会返回 409 错误（可以忽略）
 4. 如果 Agent 已存在，建议先使用 `batch_delete.sh` 删除旧 Agent
+5. **分批授权（2026-10-30）**：当 `.env` 配了 `LARK_AUTH_IDS` 时，脚本走分批模式——
+   先调用 `lark_auth_batches.py --apply` 确保各批资源就绪（幂等，已存在的**不会修改**），
+   再绑定全部批次 + GWS。任一批次缺失/不符合预期即中止注册，避免绑出残缺授权。
+   未配 `LARK_AUTH_IDS` 时仍走原来的单批逻辑（向后兼容）。
 
 ---
 
@@ -152,7 +156,41 @@ PORT=8080 ./scripts/run.local.sh web   # 自定义端口
 **特点**：
 - 自动读取 `.env` 和 `.deploy_env`
 - 依次调用 `delete_agent.sh`、`delete_authorization.sh` 和 `delete_reasoning_engine.sh`
+- **分批授权（2026-10-30）**：会逐个删除 `LARK_AUTH_IDS` 里的**每一批** + 旧单批
+  `LARK_AUTH_ID` + `GOOGLE_WORKSPACE_AUTH_ID`（自动去重），避免卸载后残留 4 批资源
 - 可选清空本地部署记录文件
+
+---
+
+### 9. `lark_auth_batches.py`
+**功能**：飞书分批授权资源的检查 / 创建 / 资源名录（幂等，默认只读）
+
+**使用方法**：
+```bash
+python3 scripts/lark_auth_batches.py --check        # 只检查（默认），有偏差退出码 2
+python3 scripts/lark_auth_batches.py --apply        # 创建缺失批次；已存在的绝不修改
+python3 scripts/lark_auth_batches.py --print-names  # 输出资源全名，供脚本组装绑定
+```
+
+**行为边界（重要）**：
+- 批次定义来自 `docs/lark_scope_batches.json`，作用对象是 `.env` 的 `LARK_AUTH_IDS`
+- **不提供自动修改既有资源**：GE 的 `GET` 返回 `clientSecret: <redacted>`，回写会把密钥写坏；
+  有偏差只报告，人工处理
+- 构造授权 URL 时手工拼 `%20`（不能用 `urlencode`，它把空格编成 `+`，飞书按字面量解析会失效）
+
+---
+
+### 10. `check_ge_auth_binding.sh`
+**功能**：校验 GE Agent 的 `toolAuthorizations` 是否覆盖配置要求
+
+**使用方法**：
+```bash
+bash scripts/check_ge_auth_binding.sh
+```
+
+**为什么需要**：部署只更新 engine 绑定，**不会**改动 `authorizationConfig`。
+「引擎支持 4 批」和「agent 绑了 4 批」是两件独立的事；漏绑会让用户授权了却读不到
+token。`deploy.sh` 在更新部署后会调用它（只告警、不自动改授权配置）。
 
 ---
 
