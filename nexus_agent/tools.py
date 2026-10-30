@@ -11,6 +11,7 @@ from nexus_agent.config import (
     GOOGLE_WORKSPACE_AUTH_ID,
     GOOGLE_WORKSPACE_PROJECT_ID,
     LARK_AUTH_ID,
+    LARK_AUTH_IDS,
     LARK_CLIENT_ID,
 )
 from nexus_agent.gws_registry import (
@@ -237,15 +238,55 @@ def _read_auth_token(state: Any, auth_id: str) -> str:
     return ""
 
 
+def _token_candidate_ids(primary: str, batch_ids: list[str] | None = None) -> list[str]:
+    """组装 token 读取的候选 auth_id，**最全优先**。
+
+    飞书 scope 是累积的：同一用户最后一次授权拿到的 token 含此前已授予的全部
+    权限。GE 按 ``toolAuthorizations`` 顺序逐批 consent，因此按**批次逆序**尝试
+    （最后一批最全），最后回退到单批 ``primary``（兼容未改造与回滚场景）。
+
+    逆序的风险：若 GE 的 consent 顺序与列表顺序不一致，取到的可能不是最全的
+    token，表现为「读到 token 但仍报 99991679」——这是已知限制，已在方案文档
+    第 7 章记录。
+    """
+    ordered: list[str] = []
+    for auth_id in list(reversed(batch_ids or [])) + [primary]:
+        if auth_id and auth_id not in ordered:
+            ordered.append(auth_id)
+    return ordered
+
+
+def _read_token_from_ids(state: Any, auth_ids: list[str]) -> str:
+    """按序尝试多个 auth_id，返回第一个非空 token。"""
+    for auth_id in auth_ids:
+        token = _read_auth_token(state, auth_id)
+        if token:
+            return token
+    return ""
+
+
+def _batch_auth_suffix(batch_ids: list[str]) -> str:
+    """报错文案用：补充分批授权 id，避免排查时只看到一个 key。"""
+    if not batch_ids:
+        return ""
+    return f", plus {len(batch_ids)} batch auth id(s): {', '.join(batch_ids)}"
+
+
 def get_access_token(tool_context: ToolContext) -> str:
     """Get the Feishu/Lark user access token from the tool context.
 
     Token 由 Gemini Enterprise 通过 ``authorizations`` 注入，ADK 以 state 承担
     传递（key 格式随版本变化，见 ``_read_auth_token``）。
+
+    分批授权时按「最全优先」依次尝试 ``LARK_AUTH_IDS``，最后回退单批
+    ``LARK_AUTH_ID``（见 ``_token_candidate_ids``）。
     """
     if isinstance(tool_context, str):
         return tool_context
-    return _read_auth_token(getattr(tool_context, "state", None), LARK_AUTH_ID)
+    return _read_token_from_ids(
+        getattr(tool_context, "state", None),
+        _token_candidate_ids(LARK_AUTH_ID, LARK_AUTH_IDS),
+    )
 
 
 def get_google_workspace_access_token(tool_context: ToolContext) -> str:
@@ -1368,7 +1409,7 @@ def _run_lark_cli(args: list, tool_context: ToolContext, timeout_seconds: int = 
                 MESSAGE_KEY: (
                     "Feishu/Lark authentication required. Missing token in "
                     f"tool_context.state (tried 'temp:{LARK_AUTH_ID}' and "
-                    f"'{LARK_AUTH_ID}')."
+                    f"'{LARK_AUTH_ID}'{_batch_auth_suffix(LARK_AUTH_IDS)})."
                 ),
             }
         return cli_client.run_command(

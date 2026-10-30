@@ -259,3 +259,89 @@ class TestErrorMessageMentionsBothKeys:
         with open("nexus_agent/tools.py") as f:
             src = f.read()
         assert "tried 'temp:{GOOGLE_WORKSPACE_AUTH_ID}'" in src
+
+# ---------------------------------------------------------------------------
+# 分批授权（2026-10-30）：飞书 173 项 user 权限超单批容量，按 4 批下发。
+# 读取策略：批次逆序（最后一批最全，因飞书 scope 累积）→ 回退单批 LARK_AUTH_ID。
+# ---------------------------------------------------------------------------
+
+
+class TestBatchAuthIds:
+    """候选顺序与多 id 读取。"""
+
+    def test_candidate_order_is_reversed_then_legacy(self):
+        from nexus_agent.tools import _token_candidate_ids
+
+        assert _token_candidate_ids(
+            "legacy", ["b1", "b2", "b3", "b4"]
+        ) == ["b4", "b3", "b2", "b1", "legacy"]
+
+    def test_candidate_order_without_batches(self):
+        """未配置多批（回滚态）时只尝试单批 id。"""
+        from nexus_agent.tools import _token_candidate_ids
+
+        assert _token_candidate_ids("legacy", []) == ["legacy"]
+        assert _token_candidate_ids("legacy", None) == ["legacy"]
+
+    def test_candidate_dedupes_primary_present_in_batches(self):
+        from nexus_agent.tools import _token_candidate_ids
+
+        assert _token_candidate_ids("b2", ["b1", "b2"]) == ["b2", "b1"]
+
+    def test_reads_last_batch_first_when_all_present(self):
+        """全部批次都有 token 时，取最后一批（最全）。"""
+        from nexus_agent.tools import _read_token_from_ids
+
+        state = {f"temp:b{i}": f"T{i}" for i in (1, 2, 3, 4)}
+        assert _read_token_from_ids(state, ["b4", "b3", "b2", "b1"]) == "T4"
+
+    def test_falls_back_when_last_batch_missing(self):
+        """只授权了第 2 批时仍能取到（不因缺批而全空）。"""
+        from nexus_agent.tools import _read_token_from_ids
+
+        state = {"temp:b2": "ONLY2"}
+        assert _read_token_from_ids(state, ["b4", "b3", "b2", "b1"]) == "ONLY2"
+
+    def test_all_missing_returns_empty(self):
+        from nexus_agent.tools import _read_token_from_ids
+
+        assert _read_token_from_ids({}, ["b4", "b1"]) == ""
+
+    def test_legacy_single_key_still_readable(self):
+        """回滚场景：旧单批 key 必须仍能读到。"""
+        from nexus_agent.tools import _read_token_from_ids
+
+        assert _read_token_from_ids({"temp:legacy": "OLD"}, ["b1", "legacy"]) == "OLD"
+
+    def test_batch_suffix_appears_in_error_hint(self):
+        """报错文案要列出批次 id，否则排查只看得到一个 key。"""
+        from nexus_agent.tools import _batch_auth_suffix
+
+        assert _batch_auth_suffix([]) == ""
+        s = _batch_auth_suffix(["b1", "b2"])
+        assert "2 batch" in s and "b1" in s and "b2" in s
+
+
+class TestBatchEnvParsing:
+    """LARK_AUTH_IDS 的解析（逗号分隔、去重、保序、容错）。"""
+
+    def test_splits_and_trims(self):
+        from nexus_agent.config import _split_csv_ids
+
+        assert _split_csv_ids(" b1 , b2 ,b3 ") == ["b1", "b2", "b3"]
+
+    def test_dedupes_preserving_order(self):
+        from nexus_agent.config import _split_csv_ids
+
+        assert _split_csv_ids("b1,b2,b1") == ["b1", "b2"]
+
+    def test_empty_and_none(self):
+        from nexus_agent.config import _split_csv_ids
+
+        assert _split_csv_ids("") == []
+        assert _split_csv_ids(None) == []
+
+    def test_trailing_comma_ignored(self):
+        from nexus_agent.config import _split_csv_ids
+
+        assert _split_csv_ids("b1,b2,") == ["b1", "b2"]

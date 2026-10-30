@@ -303,6 +303,9 @@ def _run_deploy() -> None:
         # AGENT_THINKING_LEVEL 等可选开关默认就是空（语义为"不设置"）。
         _env_vars = {
             "LARK_AUTH_ID": os.getenv("LARK_AUTH_ID"),
+            # 分批授权（逗号分隔，顺序 = GE toolAuthorizations 的 consent 顺序）。
+            # 为空则不注入 → 代码回退单批 LARK_AUTH_ID（未改造/回滚场景）。
+            "LARK_AUTH_IDS": os.getenv("LARK_AUTH_IDS"),
             "LARK_DOMAIN": os.getenv("LARK_DOMAIN"),
             "LARK_CLIENT_ID": os.getenv("LARK_CLIENT_ID"),
             "GOOGLE_WORKSPACE_AUTH_ID": os.getenv("GOOGLE_WORKSPACE_AUTH_ID"),
