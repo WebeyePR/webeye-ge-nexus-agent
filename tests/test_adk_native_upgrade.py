@@ -9,6 +9,19 @@
 import asyncio
 import logging
 import os
+import subprocess
+
+
+def _git_tracks(path: str) -> bool:
+    """git 是否跟踪该路径（文件或目录下的任意文件）。"""
+    try:
+        r = subprocess.run(
+            ["git", "ls-files", "--", path],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return False
+    return bool(r.stdout.strip())
 
 
 from google.adk.sessions import InMemorySessionService
@@ -180,13 +193,19 @@ class TestResidualsEradicated:
         assert not os.path.exists("nexus_agent/js_bridge"), "空目录 js_bridge 应删除"
 
     def test_stale_wheel_removed(self):
-        assert not os.path.exists(
-            "nexus_agent/deployment/adk_agents-0.1.0-py3-none-any.whl"
-        ), "旧项目名 wheel 残留未根除"
-        assert not os.path.exists(
-            "nexus_agent/deployment/ge_nexus_agent-1.0.0-py3-none-any.whl"
-        ), "初版项目名 wheel 残留未根除"
-        assert not os.path.exists("build/"), "build/ 构建产物目录不得入库/残留"
+        """构建产物不得入库（原先断言「磁盘上不得存在」，与真实 deploy 冲突）。
+
+        2026-10-30 修正：`deploy.sh` 走 `uv build` 必然产出
+        `nexus_agent/deployment/ge_nexus_agent-1.0.0-py3-none-any.whl` 与 `build/`，
+        原断言导致「每次真实部署后必红」。构建产物本身是正常的，问题只在入库，
+        故改为在 git 层面断言未跟踪（`.gitignore` 已覆盖 `*.whl` / `build/`）。
+        """
+        for path in (
+            "nexus_agent/deployment/adk_agents-0.1.0-py3-none-any.whl",
+            "nexus_agent/deployment/ge_nexus_agent-1.0.0-py3-none-any.whl",
+        ):
+            assert not _git_tracks(path), f"构建产物不得入库: {path}"
+        assert not _git_tracks("build"), "build/ 构建产物目录不得入库"
 
     def test_deploy_module_has_audit_plugin(self):
         """deploy.py 的 app 构造必须携带审计插件与模型自愈重试插件。"""
