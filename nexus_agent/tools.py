@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import re
+from typing import Any
 
 
 from google.adk.tools import LongRunningFunctionTool, ToolContext
@@ -174,19 +175,81 @@ def _normalize_markdown_for_new_doc(title: str, markdown: str) -> str:
     return normalized.strip()
 
 
-def get_access_token(tool_context: ToolContext) -> str:
+def _coerce_token(value: Any) -> str:
+    """把 state 里存放的凭据统一提取成裸 access token 字符串。
+
+    GE/ADK 正常写入的是字符串；此处兼容 dict 形态（如 AuthCredential 序列化
+    结果）属于防御性处理，避免"读到了却因类型不符被判为空"。
     """
-    Get the access token from the tool context.
+    if not value:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("access_token", "accessToken", "token"):
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate:
+                return candidate
+    return ""
+
+
+def _read_auth_token(state: Any, auth_id: str) -> str:
+    """读取 GE / ADK 注入的用户授权凭据。
+
+    同一语义的 key 在 ADK 历史版本里换过两次（temp: 前缀 → 无前缀 → temp: 前缀），
+    因此必须双格式兼容。这也与 ADK 官方 ``AuthHandler._read_stored_credential``
+    的两段回退（先 ``temp:<key>``，后 ``<key>``）保持同构。
+
+    命中顺序：
+      1. ``temp:{auth_id}`` — aiplatform>=2.0（含当前 2.6）的现行写法；token
+         只在本轮 invocation 的内存态可见，不落库
+      2. ``{auth_id}``      — aiplatform 1.x 的写法；写入 session 并持久化，
+         升级前遗留的会话仍可能停在这种形态
+
+    兜底：若两者都未命中，则在 ``temp:`` 作用域里查找**唯一一个**以 auth_id
+    结尾的键。GE 侧传入的 key 可能是授权资源全名而非裸 auth_id，此兜底覆盖
+    该差异；严格限定命中唯一，避免误取同会话内其他授权凭据。
+    """
+    if state is None or not auth_id:
+        return ""
+
+    for key in (f"temp:{auth_id}", auth_id):
+        token = _coerce_token(state.get(key))
+        if token:
+            return token
+
+    try:
+        # 真实 ADK 运行时 state 是 State 对象（带 to_dict）；构造/测试场景可能
+        # 直接是 dict，两种都支持，避免兜底被异常静默吞掉。
+        raw_state = state.to_dict() if hasattr(state, "to_dict") else dict(state)
+        relaxed = [
+            key
+            for key in raw_state
+            if isinstance(key, str)
+            and key.startswith("temp:")
+            and key.endswith(auth_id)
+        ]
+    except Exception:
+        return ""
+
+    if len(relaxed) == 1:
+        return _coerce_token(state.get(relaxed[0]))
+    return ""
+
+
+def get_access_token(tool_context: ToolContext) -> str:
+    """Get the Feishu/Lark user access token from the tool context.
+
+    Token 由 Gemini Enterprise 通过 ``authorizations`` 注入，ADK 以 state 承担
+    传递（key 格式随版本变化，见 ``_read_auth_token``）。
     """
     if isinstance(tool_context, str):
         return tool_context
-    else:
-        return tool_context.state.get(f"{LARK_AUTH_ID}")
+    return _read_auth_token(getattr(tool_context, "state", None), LARK_AUTH_ID)
 
 
 def get_google_workspace_access_token(tool_context: ToolContext) -> str:
-    """
-    Get the Google Workspace access token from the tool context.
+    """Get the Google Workspace user access token from the tool context.
 
     The expected token should carry the Workspace scopes needed by the target
     gws command. The CLI only consumes access tokens; refresh must happen in the
@@ -194,7 +257,7 @@ def get_google_workspace_access_token(tool_context: ToolContext) -> str:
     """
     if isinstance(tool_context, str):
         return tool_context
-    return tool_context.state.get(f"{GOOGLE_WORKSPACE_AUTH_ID}")
+    return _read_auth_token(getattr(tool_context, "state", None), GOOGLE_WORKSPACE_AUTH_ID)
 
 
 def _clean_markdown_from_plain_text(text: str) -> str:
@@ -258,8 +321,9 @@ def _run_google_workspace_cli(args: list, tool_context: ToolContext, timeout_sec
             return {
                 STATUS_KEY: STATUS_ERROR,
                 MESSAGE_KEY: (
-                    "Google Workspace authentication required. "
-                    f"Missing token in tool_context.state['{GOOGLE_WORKSPACE_AUTH_ID}']."
+                    "Google Workspace authentication required. Missing token in "
+                    f"tool_context.state (tried 'temp:{GOOGLE_WORKSPACE_AUTH_ID}' "
+                    f"and '{GOOGLE_WORKSPACE_AUTH_ID}')."
                 ),
             }
         return gws_cli_client.run_command(
@@ -1302,8 +1366,9 @@ def _run_lark_cli(args: list, tool_context: ToolContext, timeout_seconds: int = 
             return {
                 STATUS_KEY: STATUS_ERROR,
                 MESSAGE_KEY: (
-                    "Feishu/Lark authentication required. "
-                    f"Missing token in tool_context.state['{LARK_AUTH_ID}']."
+                    "Feishu/Lark authentication required. Missing token in "
+                    f"tool_context.state (tried 'temp:{LARK_AUTH_ID}' and "
+                    f"'{LARK_AUTH_ID}')."
                 ),
             }
         return cli_client.run_command(
