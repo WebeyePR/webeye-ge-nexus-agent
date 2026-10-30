@@ -81,8 +81,23 @@ PORT=8080 ./scripts/run.local.sh web   # 自定义端口
 
 **使用方法**：
 ```bash
-./scripts/delete_agent.sh <AGENT_NAME>
+./scripts/delete_agent.sh <AGENT_NAME>   # 显式传参：直接删，不二次确认
+./scripts/delete_agent.sh --yes          # 无参：删 .deploy_env 的当前部署，跳过确认
+./scripts/delete_agent.sh                # 无参：删当前部署，需交互确认
+./scripts/delete_agent.sh --help         # 帮助
 ```
+
+**确认策略（2026-10-30 起）**：
+
+| 用法 | 二次确认 | 说明 |
+|---|---|---|
+| 传 `<AGENT_NAME>` | ❌ 不确认 | 传参即明确意图。`cleanup_deployed.sh` 等批处理链路依赖「传参不读 stdin」 |
+| 无参 + `--yes` | ❌ 不确认 | 显式声明要删默认值 |
+| 无参（无 `--yes`） | ✅ 确认 | 无参会落到 `.deploy_env` 的 `GE_AGENT_RESOURCE_NAME`，是「删线上当前部署」的隐含路径 |
+
+- **非交互环境（无 tty）无法确认时直接中止，一次 API 都不发**（退出码 1），避免 `./delete_agent.sh`
+  在 CI/管道里静默删掉线上 Agent
+- 退出码：`0` = 删除成功或已不存在（404 幂等）；`1` = 参数缺失 / 无法确认 / API 删除失败
 
 **示例**：
 ```bash
@@ -98,15 +113,24 @@ PORT=8080 ./scripts/run.local.sh web   # 自定义端口
 
 **使用方法**：
 ```bash
-./scripts/delete_authorization.sh <AUTH_ID>
+./scripts/delete_authorization.sh <AUTH_ID>   # 显式传参：直接删，不二次确认
+./scripts/delete_authorization.sh --yes       # 无参：删 .env 的 LARK_AUTH_ID，跳过确认
+./scripts/delete_authorization.sh             # 无参：删 LARK_AUTH_ID，需交互确认
+./scripts/delete_authorization.sh --help      # 帮助
 ```
+
+确认策略与 `delete_agent.sh` 完全一致（传参不确认 / 无参必确认 / 无 tty 中止 / 失败退出码 1）。
+无参时若检测到 `LARK_AUTH_IDS` 分批模式，会额外提示「本命令只删 legacy 单批」。
 
 **示例**：
 ```bash
-./scripts/delete_authorization.sh lark-agent-oauth-id
+./scripts/delete_authorization.sh ge-nexus-feishu-1
 ```
 
-**注意**：如果授权资源正在被 Agent 使用，删除会失败。需要先删除使用该授权资源的 Agent。
+**被 Agent 占用时**：API 会拒绝物理删除，脚本打印占用方并**安全跳过**（退出码 0，不是失败），
+同时给出下一步命令 `bash scripts/delete_agent.sh "<占用方>"`。
+
+**注意**：分批授权（4 批）请逐个传参删除，或直接跑 `cleanup_deployed.sh`（已自动遍历去重）。
 
 ---
 
@@ -122,6 +146,9 @@ PORT=8080 ./scripts/run.local.sh web   # 自定义端口
 - 优先尝试使用 `gcloud`
 - 如果 `gcloud` 命令不可用，自动回退到直接调用 REST API
 - 自动处理 404 等已删除状态
+- ⚠️ **无参时会直接删 `.deploy_env` 的 `VERTEX_REASONING_ENGINE_NAME`（当前线上引擎），
+  且「没有」二次确认、`?force=true` 不可逆** —— 手工调用前先确认那个值是要删的引擎
+  （与 `delete_agent.sh` / `delete_authorization.sh` 的确认门禁不一致，见文末注意事项表）
 
 ---
 
@@ -156,9 +183,10 @@ PORT=8080 ./scripts/run.local.sh web   # 自定义端口
 **特点**：
 - 自动读取 `.env` 和 `.deploy_env`
 - 依次调用 `delete_agent.sh`、`delete_authorization.sh` 和 `delete_reasoning_engine.sh`
+- 子脚本全部以**显式传参**方式调用 → 不会弹确认、不会读 stdin（`while … <<<` 循环才不会漏项）
 - **分批授权（2026-10-30）**：会逐个删除 `LARK_AUTH_IDS` 里的**每一批** + 旧单批
   `LARK_AUTH_ID` + `GOOGLE_WORKSPACE_AUTH_ID`（自动去重），避免卸载后残留 4 批资源
-- 可选清空本地部署记录文件
+- 可选清空本地部署记录文件（这一步是脚本内**唯一**的交互提示，非交互环境自动跳过）
 
 ---
 
@@ -225,6 +253,20 @@ python3 scripts/plan_lark_scope_batches.py --from-cache app_scopes.json --check 
 
 不再需要在脚本中硬编码这些 ID。
 
+### 环境后缀（`ENV_SUFFIX`）约定 —— 2026-10-30 修
+
+`load_env.sh` **只认 `ENV_SUFFIX` 变量**，不再读取 `source` 时的 `$1`。
+
+- 需要切环境：`export ENV_SUFFIX=dev`（或按脚本自己的第 1 个参数传入，脚本内部会转成该变量）
+  → 读 `.env-dev` / `.deploy_env-dev`；`deploy.sh`、`cleanup_deployed.sh` 本来就是这样做的，能力不变
+- **为什么改**：`source` 时 `$1` 是**调用方脚本**的位置参数。旧实现里
+  `delete_authorization.sh ge-nexus-feishu-1` 会把 `ge-nexus-feishu-1` 当环境后缀 →
+  去找 `.env-ge-nexus-feishu-1`（不存在）→ `PROJECT_ID` 为空 →
+  删除请求 URL 变成 `projects//locations/global/authorizations/...` →
+  API 返回 `400 RESOURCE_PROJECT_INVALID`。实测确认，属真缺陷（同类受害者：
+  `delete_agent.sh`、`delete_reasoning_engine.sh`、`run.local.sh` 的 `web/api/run`）
+- 后缀对应的配置文件不存在时，**加载阶段就在 stderr 告警**，不再静默空配置
+
 ---
 
 ## 📝 使用流程示例
@@ -262,4 +304,16 @@ python3 scripts/plan_lark_scope_batches.py --from-cache app_scopes.json --check 
 1. **授权资源依赖**：删除授权资源前，必须先删除所有使用该授权资源的 Agent
 2. **API 延迟**：删除操作后可能需要等待几秒钟，API 才会更新状态
 3. **权限要求**：所有脚本都需要 `gcloud auth print-access-token` 有权限访问 Gemini Enterprise API
+4. **破坏性脚本的确认策略一览**：
+
+   | 脚本 | 传参 | 无参 | 非交互 |
+   |---|---|---|---|
+   | `delete_agent.sh` | 直接删 | **确认**（删 `.deploy_env` 当前部署） | 中止，退出码 1 |
+   | `delete_authorization.sh` | 直接删 | **确认**（删 `.env` 的 `LARK_AUTH_ID`） | 中止，退出码 1 |
+   | `delete_reasoning_engine.sh` | 直接删 | ⚠️ **不确认**（删 `VERTEX_REASONING_ENGINE_NAME` 当前引擎，`?force=true`） | 直接执行 |
+   | `cleanup_deployed.sh` | —（无位置参数） | 逐个传参调用子脚本，全程不弹确认 | 可全自动 |
+   | `batch_delete.sh` | 交互式菜单 | 菜单内自带确认 | 不适合非交互 |
+
+   `delete_reasoning_engine.sh` 是三个删除脚本里唯一「无参即删当前引擎且不确认」的，
+   手工调用前务必先看 `.deploy_env` 里的 `VERTEX_REASONING_ENGINE_NAME` 是否为要删的那一个。
 
