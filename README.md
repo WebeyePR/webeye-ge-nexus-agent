@@ -170,41 +170,31 @@ GOOGLE_API_KEY="your-api-key"
 2. 在应用管理页面，点击添加应用能力，找到机器人卡片，点击 +添加。
     ![img.png](docs/imgs/img.png)
 
-3. 为应用开启如下权限（与 `scripts/lark_scopes.json` 保持一致，该文件为权限唯一定义源，新增能力时请同步更新）：
-    ```json
-    {
-      "scopes": {
-        "tenant": [],
-        "user": [
-          "offline_access",
-          "bitable:app",
-          "docx:document",
-          "docs:document:import",
-          "docs:document.content:read",
-          "docs:document:export",
-          "docs:permission.setting:read",
-          "docx:document:readonly",
-          "docs:document.media:download",
-          "drive:drive",
-          "drive:drive.metadata:readonly",
-          "drive:drive.search:readonly",
-          "drive:drive:readonly",
-          "wiki:wiki",
-          "wiki:wiki:readonly",
-          "drive:export:readonly",
-          "search:docs:read",
-          "calendar:calendar",
-          "calendar:calendar:readonly",
-          "calendar:calendar.event:create",
-          "calendar:calendar.event:read",
-          "calendar:calendar.event:update",
-          "im:chat",
-          "im:message",
-          "im:message.group_msg"
-        ]
-      }
-    }
-    ```
+3. 为应用开通权限。**权限的权威源是飞书 `app.scopes`**
+   （`GET /open-apis/application/v6/applications/{app_id}`，每条带 `token_types`）。
+
+   | 场景 | 清单 | 说明 |
+   |---|---|---|
+   | **分批授权（当前生产）** | `docs/lark_scope_batches.json` | 173 项 user 态权限，4 批（45/45/45/38）。可用 `python3 scripts/plan_lark_scope_batches.py --check` 校验是否与线上一致 |
+   | 单批回滚 | `scripts/lark_scopes.json` | `user` 18 项 + `tenant` 7 项 |
+
+   ⚠️ 两点必须注意：
+
+   - **只有 `user` 数组会进用户授权链接**。`tenant` 数组是应用身份（`tenant_access_token`）权限，
+     用户走 OAuth **永远拿不到**，混进去属无效请求（可能触发 `20068`）。
+   - `scripts/lark_scopes.json` 自 2026-10-30 起**不再是「唯一定义源」**，已由分批清单取代
+     （文件内 `supersededBy` 字段已标注），仅服务单批回滚路径。
+
+   新增能力时的正确顺序：
+   ```bash
+   # 1) 先在飞书开放平台开通权限并发布版本
+   # 2) 重新生成/校验分批清单（超限会报错而不是静默拆批）
+   python3 scripts/plan_lark_scope_batches.py --check
+   python3 scripts/plan_lark_scope_batches.py --write   # 确认差异后写入（先备份 .bak）
+   # 3) 若批次数/批名变化 → 同步 .env 的 LARK_AUTH_IDS 并重新绑定 GE 授权
+   python3 scripts/lark_auth_batches.py --apply
+   bash scripts/check_ge_auth_binding.sh
+   ```
 4. 配置 OAuth2.0 回调 URL：
     ```
     https://vertexaisearch.cloud.google.com/oauth-redirect
