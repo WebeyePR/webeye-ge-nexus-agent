@@ -72,11 +72,18 @@ AUTH_RESOURCES=()
 if [ -n "$LARK_AUTH_IDS" ]; then
     # 分批授权模式（2026-10-30）：每批一个 authorization。
     # 幂等：缺失则创建，已存在只校验不修改；有偏差即中止，避免绑定残缺授权。
-    echo "1. 检测到分批授权 LARK_AUTH_IDS=$LARK_AUTH_IDS，正在确保各批资源就绪 ..."
+    echo "1. 检测到分批授权（LARK_AUTH_IDS=${LARK_AUTH_IDS}），正在确保各批资源就绪 ..."
     python3 "$SCRIPT_DIR/lark_auth_batches.py" --env-file "$BASE_ENV_FILE" --apply
     while IFS= read -r auth_resource_name; do
         [ -n "$auth_resource_name" ] && AUTH_RESOURCES+=("\"$auth_resource_name\"")
     done < <(python3 "$SCRIPT_DIR/lark_auth_batches.py" --env-file "$BASE_ENV_FILE" --print-names)
+    # 进程替换里的失败不会被 set -e 捕获，必须显式核对条数，
+    # 否则「门名录静默为空」会导致 agent 只绑 GWS（授权=全失效）而不报错。
+    EXPECTED_BATCH_COUNT=$(echo "$LARK_AUTH_IDS" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | awk 'NF && !seen[$0]++' | wc -l | tr -d ' ')
+    if [ "${#AUTH_RESOURCES[@]}" -ne "$EXPECTED_BATCH_COUNT" ]; then
+        echo "错误: 飞书授权资源条数(${#AUTH_RESOURCES[@]})与 LARK_AUTH_IDS 批次数($EXPECTED_BATCH_COUNT)不一致，已中止注册（避免绑定残缺授权）。"
+        exit 1
+    fi
     echo "   → 已准备 ${#AUTH_RESOURCES[@]} 条飞书授权资源"
 else
     # 单批模式（历史行为，保留兼容）
