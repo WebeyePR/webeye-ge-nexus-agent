@@ -96,11 +96,14 @@ def generate_batch_auth_urls() -> bool:
 
 def generate_lark_auth_url():
     # 1. 尝试加载 .env 文件获取配置
+    env_loaded_by_dotenv = True
     try:
         from dotenv import load_dotenv
         load_dotenv()
     except ImportError:
-        pass
+        # 系统 python3 常缺 python-dotenv：此时 .env 根本没被读，若直接报
+        # 「LARK_CLIENT_ID not found in .env file」会把人引去改 .env（其实配置是对的）。
+        env_loaded_by_dotenv = False
 
     # 分批授权优先：LARK_AUTH_IDS 非空且批次定义存在时，按批输出并结束
     if generate_batch_auth_urls():
@@ -150,6 +153,10 @@ def generate_lark_auth_url():
             redirect_uri = query_params.get('redirect_uri', [None])[0]
 
     if not client_id:
+        if not env_loaded_by_dotenv:
+            print("提示: 当前解释器缺少 python-dotenv，.env 未被加载（配置本身可能是对的）。")
+            print("      请改用项目虚拟环境运行：.venv/bin/python scripts/generate_auth_link.py")
+            return
         print("Error: LARK_CLIENT_ID not found in .env file.")
         print("Please add 'LARK_CLIENT_ID=your_cli_id' to your .env file.")
         return
