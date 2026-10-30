@@ -540,3 +540,109 @@ def test_update_lark_document_rejects_legacy_freeform_modes(monkeypatch):
         )
         assert result["status"] == "error", legacy_mode
         assert "execute_lark_cli" in result["message"]
+
+
+def test_download_images_success_uses_numbered_placeholder(monkeypatch):
+    """
+    download_images=True 且图片下载成功时，工具返回的内容里不能出现指向 artifact
+    文件名的 markdown 图片语法（GE 聊天正文不解析它，只会显示成裸文件名），
+    而应输出（图N）编号占位 + 文末对照表。
+
+    2026-10-30 决策依据：docs/GE图片内联渲染调研与方案.md 第 8 章。
+    """
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(lark_tools, "get_access_token", lambda ctx: "fake-token")
+
+    test_markdown = (
+        "开头\n\n![Logo](https://internal-api-drive-stream.feishu.cn/a/logo.png)\n\n"
+        "中间\n\n![Arch](https://internal-api-drive-stream.feishu.cn/a/arch.png)\n"
+    )
+    monkeypatch.setattr(
+        lark_tools.lark_api_repository,
+        "get_document_markdown",
+        lambda access_token, doc_token: test_markdown,
+    )
+
+    class MockResp:
+        status_code = 200
+        content = b"\x89PNG\r\n\x1a\n" + b"x" * 16
+        headers = {"Content-Type": "image/png"}
+
+    class MockSession:
+        def get(self, url, headers=None, timeout=None):
+            return MockResp()
+
+    import nexus_agent.infrastructure.lark_api_repository as repo
+    monkeypatch.setattr(repo, "_session", MockSession())
+
+    ctx = MagicMock()
+    ctx.state = {}
+    ctx.save_artifact = AsyncMock(return_value=1)
+
+    result = asyncio.run(
+        lark_tools.get_lark_document_markdown(
+            doc_token="docx_abcdef123456", tool_context=ctx, download_images=True
+        )
+    )
+    content = result["content"]
+
+    assert result["status"] == "success"
+    assert "![" not in content, "不得输出 markdown 图片语法（GE 不渲染，会成裸文件名）"
+    assert "（图1）" in content and "（图2）" in content
+    assert content.index("（图1）") < content.index("（图2）"), "编号必须与原文顺序一致"
+    assert "图片对照" in content, "文末必须给出对照表"
+    assert "图1 = lark_" in content and "图2 = lark_" in content
+    assert "该图片已作为" not in content, "不得再为每张图附加脚注（污染正文）"
+    assert ctx.save_artifact.await_count == 2
+
+
+def test_download_images_partial_failure_keeps_numbering_continuous(monkeypatch):
+    """
+    部分图片下载失败时：编号必须连续（不能出现 图1、图3），
+    失败图片保留原始直链（既有兜底行为，不得回归）。
+    """
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(lark_tools, "get_access_token", lambda ctx: "fake-token")
+
+    test_markdown = (
+        "A\n\n![one](https://internal-api-drive-stream.feishu.cn/a/one.png)\n\n"
+        "B\n\n![two](https://internal-api-drive-stream.feishu.cn/a/broken.png)\n\n"
+        "C\n\n![three](https://internal-api-drive-stream.feishu.cn/a/three.png)\n"
+    )
+    monkeypatch.setattr(
+        lark_tools.lark_api_repository,
+        "get_document_markdown",
+        lambda access_token, doc_token: test_markdown,
+    )
+
+    class MockResp:
+        status_code = 200
+        content = b"\x89PNG\r\n\x1a\n" + b"x" * 16
+        headers = {"Content-Type": "image/png"}
+
+    class MockSession:
+        def get(self, url, headers=None, timeout=None):
+            if "broken" in url:
+                return type("R", (), {"status_code": 500, "content": b"", "headers": {}})()
+            return MockResp()
+
+    import nexus_agent.infrastructure.lark_api_repository as repo
+    monkeypatch.setattr(repo, "_session", MockSession())
+
+    ctx = MagicMock()
+    ctx.state = {}
+    ctx.save_artifact = AsyncMock(return_value=1)
+
+    result = asyncio.run(
+        lark_tools.get_lark_document_markdown(
+            doc_token="docx_abcdef123456", tool_context=ctx, download_images=True
+        )
+    )
+    content = result["content"]
+
+    assert "（图1）" in content and "（图2）" in content
+    assert "（图3）" not in content, "失败图片不应占用编号，否则会出现断号"
+    assert "broken.png" in content, "失败图片必须保留原始直链（既有兜底）"
+    assert ctx.save_artifact.await_count == 2, "仅成功下载的两张才注册产物"

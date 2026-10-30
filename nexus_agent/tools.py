@@ -1905,6 +1905,7 @@ async def get_lark_document_markdown(
                 from google.genai import types
 
                 url_to_artifact = {}
+                figure_map: list[tuple[int, str]] = []
                 headers = {"Authorization": f"Bearer {access_token}"}
 
                 for idx, (alt_text, img_url) in enumerate(matches, 1):
@@ -1947,28 +1948,38 @@ async def get_lark_document_markdown(
 
                             artifact_filename = f"lark_{doc_hash}_{safe_alt}"
                             artifact_part = types.Part.from_bytes(data=img_bytes, mime_type=mime_type)
-                            version = await tool_context.save_artifact(filename=artifact_filename, artifact=artifact_part)
+                            await tool_context.save_artifact(filename=artifact_filename, artifact=artifact_part)
 
-                            url_to_artifact[img_url] = (artifact_filename, version)
+                            # 仅对「下载成功」的图片连续编号，避免失败图片造成断号（图1、图3）
+                            fig_no = len(figure_map) + 1
+                            url_to_artifact[img_url] = (artifact_filename, fig_no)
+                            figure_map.append((fig_no, artifact_filename))
                         else:
                             logger.warning(f"[get_lark_document_markdown] Skip image download. Status code: {response.status_code}")
                     except Exception as ex:
                         logger.warning(f"[get_lark_document_markdown] Skip failed image download for {img_url}: {ex}")
 
-                # 替换 Markdown 中的图片标注，添加相对路径引用，触发 GE Inline 嵌入渲染，并辅以 Artifact 指引
+                # 替换 Markdown 图片标注为编号占位（2026-10-30）：
+                # GE 聊天正文不解析指向 artifact 文件名的 markdown 图片语法，
+                # 原样输出只会显示成裸文件名（且每图带一段脚注会污染正文）。
+                # 故改为「（图N）」占位 + 文末统一对照表，图片本身仍在右侧产物面板。
                 def replace_img_tag(match):
-                    alt = match.group(1)
                     url = match.group(2)
                     if url in url_to_artifact:
-                        artifact_filename, version = url_to_artifact[url]
-                        return (
-                            f"![{alt}]({artifact_filename})\n"
-                            f"*(📷 该图片已作为本地 ADK 产物成功渲染。如果未能内联显示，请在右侧‘产物/Artifacts’面板中查看：`{artifact_filename}`)*"
-                        )
+                        _, fig_no = url_to_artifact[url]
+                        return f"（图{fig_no}）"
                     # 🌟 兜底：如果下载失败，Markdown 中保留原生的原始直链，使得大模型依然可以识别
                     return match.group(0)
 
                 content = re.sub(img_pattern, replace_img_tag, content)
+
+                if figure_map:
+                    mapping = "\n".join(f"图{n} = {name}" for n, name in figure_map)
+                    content = (
+                        f"{content}\n\n---\n"
+                        "🖼️ 图片对照（已注册为独立产物，可在右侧「产物 / Artifacts」面板点击查看原图）：\n"
+                        f"{mapping}"
+                    )
 
         return {STATUS_KEY: STATUS_SUCCESS, "content": content}
 
