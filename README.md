@@ -347,6 +347,7 @@ uv run adk web
 
 *   [docs/GE流式与延迟优化手册.md](docs/GE流式与延迟优化手册.md) - **非流式/慢/回复重复的权威经验汇总**（实测数据 + 配置清单 + 排查速查）
 *   [docs/GE图片内联渲染调研与方案.md](docs/GE图片内联渲染调研与方案.md) - 图片为何跑到顶部、各通道可行性对比、base64 方案为何暂不采用
+*   [docs/飞书授权限制与分批方案.md](docs/飞书授权限制与分批方案.md) - **飞书 193/173 权限盘点、授权 4 个真实缺陷（含 redirect_uri 实测报错）、4 批 45/45/45/38 方案**
 *   [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) - 详细的打包部署指南
 *   [tests/remote/README.md](tests/remote/README.md) - 远程生产引擎回归测试（12 用例真实调用，含 3 条必守调用规范）
 *   [scripts/README.md](scripts/README.md) - 脚本工具使用说明
