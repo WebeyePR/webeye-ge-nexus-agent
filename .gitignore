@@ -56,3 +56,6 @@ nexus_agent/bin/linux-arm64/
 
 # 运维备份快照（含 .env 等敏感信息，绝不入库）
 .ops_backup/
+
+# PPT 素材与产物（本地预览用，不入库）
+ppt/
