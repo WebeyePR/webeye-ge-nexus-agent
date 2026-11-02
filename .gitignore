@@ -53,3 +53,6 @@ build/
 # 部署用的 Linux 版本在 nexus_agent/bin/<name>，必须入库
 nexus_agent/bin/darwin-*/
 nexus_agent/bin/linux-arm64/
+
+# 运维备份快照（含 .env 等敏感信息，绝不入库）
+.ops_backup/
